@@ -1,0 +1,8 @@
+venv/
+*.log
+.env
+token.json
+credentials.json
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,11 @@
+[Unit]
+Description=SECevaluator weekly college football conference digest
+
+[Service]
+Type=oneshot
+User=optiplex
+WorkingDirectory=/home/optiplex/SECevaluator
+EnvironmentFile=/home/optiplex/SECevaluator/.env
+ExecStart=/home/optiplex/SECevaluator/venv/bin/python3 secevaluator.py
+StandardOutput=append:/home/optiplex/SECevaluator/secevaluator.log
+StandardError=append:/home/optiplex/SECevaluator/secevaluator.log
