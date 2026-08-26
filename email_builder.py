@@ -45,7 +45,7 @@ def _delta_str(d: Optional[float], higher_is_better: bool = True) -> str:
 # ── HTML helpers ─────────────────────────────────────────────────────────────
 
 def _td(content: str, bg: str = "", bold: bool = False, align: str = "left", color: str = "") -> str:
-    style = f"padding:5px 10px;border:1px solid #ddd;text-align:{align};"
+    style = f"padding:4px 7px;border:1px solid #ddd;text-align:{align};font-size:12px;"
     if bg:    style += f"background:{bg};"
     if bold:  style += "font-weight:bold;"
     if color: style += f"color:{color};"
@@ -54,7 +54,15 @@ def _td(content: str, bg: str = "", bold: bool = False, align: str = "left", col
 
 def _th(content: str, bg: str = TABLE_HDR_BG, color: str = "white", title: str = "") -> str:
     tip = f" title='{title}'" if title else ""
-    return f"<th{tip} style='padding:6px 10px;border:1px solid #555;background:{bg};color:{color};text-align:left;cursor:default;'>{content}</th>"
+    return (f"<th{tip} style='padding:5px 7px;border:1px solid #555;background:{bg};"
+            f"color:{color};text-align:left;cursor:default;font-size:12px;white-space:nowrap;'>{content}</th>")
+
+
+def _record_cell(t: TeamStats, bg: str) -> str:
+    # Single cell: "8-1" bold, then "(6-1 conf / 2-0 ext)" in smaller muted text
+    sub = f"<span style='font-size:10px;color:#777;'>{t.conf_record_str}&nbsp;conf&nbsp;/&nbsp;{t.nonconf_record_str}&nbsp;ext</span>"
+    style = f"padding:4px 7px;border:1px solid #ddd;background:{bg};white-space:nowrap;"
+    return f"<td style='{style}'><strong>{t.record_str}</strong><br>{sub}</td>"
 
 
 def _team_row(t: TeamStats, idx: int) -> str:
@@ -65,9 +73,7 @@ def _team_row(t: TeamStats, idx: int) -> str:
         "<tr>"
         + _td(t.cfp_rank_str, bg=bg, bold=bool(t.cfp_rank), align="center")
         + _td(t.team, bg=bg, bold=True)
-        + _td(t.record_str, bg=bg, align="center")
-        + _td(t.conf_record_str, bg=bg, align="center")
-        + _td(t.nonconf_record_str, bg=bg, align="center")
+        + _record_cell(t, bg)
         + _td(t.sp_str, bg=bg, align="right")
         + _td(t.sos_str, bg=bg, align="right")
         + "</tr>"
@@ -78,18 +84,23 @@ def _standings_table_html(conf: ConferenceStats) -> str:
     color = _conf_color(conf.display)
     rows = "".join(_team_row(t, i) for i, t in enumerate(conf.teams))
     return f"""
-<table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px;margin-bottom:20px;'>
-  <caption style='text-align:left;font-size:16px;font-weight:bold;color:{color};padding-bottom:6px;'>
+<table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:12px;margin-bottom:20px;table-layout:fixed;'>
+  <caption style='text-align:left;font-size:15px;font-weight:bold;color:{color};padding-bottom:5px;'>
     {conf.display} Standings
   </caption>
+  <colgroup>
+    <col style='width:42px;'>
+    <col style='width:auto;'>
+    <col style='width:120px;'>
+    <col style='width:48px;'>
+    <col style='width:56px;'>
+  </colgroup>
   <thead><tr>
-    {_th("CFP", title="College Football Playoff ranking. Top 25 teams; — means unranked.")}
+    {_th("CFP", title="College Football Playoff ranking. — = unranked.")}
     {_th("Team")}
-    {_th("Overall", title="Total wins-losses across all games.")}
-    {_th("Conf", title="Record against teams within the same conference.")}
-    {_th("External", title="Record against non-conference opponents only — excludes games between teams in the same conference.")}
-    {_th("SP+", title="SP+ is ESPN's predictive team rating adjusted for opponent strength. National average = 0. +10 means roughly 10 points better than average per game.")}
-    {_th("OOC SOS", title="Out-of-Conference Strength of Schedule: average SP+ rating of non-conference opponents faced. Higher = tougher external slate.")}
+    {_th("Record (conf / ext)", title="Overall record. Sub-line: conference record / external (non-conference) record.")}
+    {_th("SP+", title="ESPN predictive rating vs avg opponent. 0 = average FBS; higher = better.")}
+    {_th("OOC SOS", title="Avg SP+ of non-conference opponents faced. Higher = tougher external slate.")}
   </tr></thead>
   <tbody>{rows}</tbody>
 </table>
@@ -122,8 +133,8 @@ def _cross_conf_table_html(cross_games: list[CrossGameResult], sec_response: str
         )
 
     return f"""
-<table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px;margin-bottom:20px;'>
-  <caption style='text-align:left;font-size:16px;font-weight:bold;color:#333;padding-bottom:6px;'>
+<table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:12px;margin-bottom:20px;'>
+  <caption style='text-align:left;font-size:15px;font-weight:bold;color:#333;padding-bottom:5px;'>
     SEC vs Big Ten Cross-Conference Results
     <span style='font-size:12px;font-weight:normal;color:#888;margin-left:8px;'>
       (Green = SEC win, Red = Big Ten win)
@@ -203,8 +214,8 @@ def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
     ]
 
     return f"""
-<table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px;margin-bottom:20px;'>
-  <caption style='text-align:left;font-size:16px;font-weight:bold;color:#333;padding-bottom:6px;'>
+<table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:12px;margin-bottom:20px;'>
+  <caption style='text-align:left;font-size:15px;font-weight:bold;color:#333;padding-bottom:5px;'>
     Conference Comparison
     <span style='font-size:11px;font-weight:normal;color:#888;margin-left:8px;'>▲▼ = change vs last week</span>
   </caption>
@@ -264,10 +275,10 @@ def build_html(
     return f"""<!DOCTYPE html>
 <html>
 <body style='margin:0;padding:0;background:#f0f0f0;'>
-<div style='max-width:700px;margin:20px auto;background:white;border-radius:8px;
+<div style='max-width:600px;margin:20px auto;background:white;border-radius:8px;
             overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.15);font-family:Arial,sans-serif;'>
 
-  <div style='background:{HEADER_BG};color:white;padding:24px 28px;'>
+  <div style='background:{HEADER_BG};color:white;padding:18px 20px;'>
     <div style='font-size:21px;font-weight:bold;letter-spacing:0.5px;'>⚔ SEC vs Big Ten — Conference War</div>
     <div style='font-size:13px;margin-top:4px;opacity:0.7;'>{year} Season &bull; Week {week} Report</div>
     <div style='margin-top:12px;font-size:17px;font-weight:bold;'>
@@ -278,7 +289,7 @@ def build_html(
     </div>
   </div>
 
-  <div style='padding:24px 28px;'>
+  <div style='padding:16px 18px;'>
     {ai_section}
     {_metric_legend_html()}
     {_comparison_table_html(sec, big10)}
