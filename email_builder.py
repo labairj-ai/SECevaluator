@@ -6,7 +6,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Optional
 
-from metrics import TeamStats, ConferenceStats, CrossGameResult
+from metrics import TeamStats, ConferenceStats, CrossGameResult, TopWin, GameOfWeek
 
 
 # ── Colors ───────────────────────────────────────────────────────────────────
@@ -123,6 +123,7 @@ def _cross_conf_table_html(cross_games: list[CrossGameResult], sec_response: str
         loser  = g.away_team if winner == g.home_team else g.home_team
         pts_w  = g.home_points if winner == g.home_team else g.away_points
         pts_l  = g.away_points if winner == g.home_team else g.home_points
+        margin = abs((g.home_points or 0) - (g.away_points or 0))
         loc    = " (N)" if g.neutral_site else ""
         score  = f"{winner} {pts_w}, {loser} {pts_l}{loc}"
         conf_w = g.home_conference if winner == g.home_team else g.away_conference
@@ -131,6 +132,7 @@ def _cross_conf_table_html(cross_games: list[CrossGameResult], sec_response: str
             + _td(f"Wk {g.week}", align="center")
             + _td(g.game_date, align="center")
             + _td(score)
+            + _td(f"+{margin}", align="center", bg=result_bg)
             + _td(conf_w, bold=True, color=_conf_color(conf_w), bg=result_bg)
             + "</tr>"
         )
@@ -144,7 +146,7 @@ def _cross_conf_table_html(cross_games: list[CrossGameResult], sec_response: str
     </span>
   </caption>
   <thead><tr>
-    {_th("Week")} {_th("Date")} {_th("Result")} {_th("Winner")}
+    {_th("Week")} {_th("Date")} {_th("Result")} {_th("Margin", title="Point differential — larger margin = more dominant win.")} {_th("Winner")}
   </tr></thead>
   <tbody>{rows}</tbody>
 </table>
@@ -232,6 +234,75 @@ def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
 """
 
 
+def _game_of_week_html(g: GameOfWeek) -> str:
+    home_color = _conf_color(g.home_conference)
+    away_color = _conf_color(g.away_conference)
+    home_sp_str = f"SP+ {g.home_sp:+.1f}" if g.home_sp is not None else ""
+    away_sp_str = f"SP+ {g.away_sp:+.1f}" if g.away_sp is not None else ""
+    return f"""
+<div style='background:#fffbe6;border:2px solid #f0c040;border-radius:6px;
+            padding:12px 16px;margin-bottom:20px;font-family:Arial,sans-serif;'>
+  <div style='font-size:11px;font-weight:bold;color:#a07800;letter-spacing:1px;
+              text-transform:uppercase;margin-bottom:6px;'>&#9733; Game of the Week — Week {g.week}</div>
+  <div style='font-size:15px;font-weight:bold;'>
+    <span style='color:{away_color};'>{g.away_team}</span>
+    <span style='color:#888;font-size:11px;margin:0 6px;'>{away_sp_str}</span>
+    <span style='color:#555;'> at </span>
+    <span style='color:{home_color};'>{g.home_team}</span>
+    <span style='color:#888;font-size:11px;margin-left:6px;'>{home_sp_str}</span>
+  </div>
+  <div style='font-size:11px;color:#888;margin-top:4px;'>{g.game_date}</div>
+</div>
+"""
+
+
+def _top_wins_html(sec_wins: list[TopWin], big10_wins: list[TopWin]) -> str:
+    if not sec_wins and not big10_wins:
+        return ""
+
+    def _wins_rows(wins: list[TopWin], conf_color: str) -> str:
+        rows = ""
+        for i, w in enumerate(wins):
+            bg = ROW_ALT if i % 2 else "white"
+            rows += (
+                "<tr>"
+                + _td(f"Wk {w.week}", bg=bg, align="center")
+                + _td(w.team, bg=bg, bold=True)
+                + _td(w.opponent, bg=bg)
+                + _td(w.score_str, bg=bg, align="center")
+                + _td(f"+{w.margin}", bg=bg, align="center")
+                + _td(f"{w.opponent_sp:+.1f}", bg=bg, align="right")
+                + "</tr>"
+            )
+        return rows
+
+    def _wins_table(wins: list[TopWin], display: str, color: str) -> str:
+        if not wins:
+            return ""
+        return f"""
+<table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;
+              font-size:12px;margin-bottom:16px;'>
+  <caption style='text-align:left;font-size:14px;font-weight:bold;color:{color};padding-bottom:4px;'>
+    {display} — Best Wins
+    <span style='font-size:10px;font-weight:normal;color:#888;margin-left:6px;'>ranked by opponent SP+</span>
+  </caption>
+  <thead><tr>
+    {_th("Wk")}
+    {_th("Winner")}
+    {_th("Opponent")}
+    {_th("Score")}
+    {_th("Margin")}
+    {_th("Opp SP+", title="SP+ rating of the opponent at end of season — higher means more impressive win.")}
+  </tr></thead>
+  <tbody>{_wins_rows(wins, color)}</tbody>
+</table>"""
+
+    return (
+        _wins_table(sec_wins, "SEC", SEC_COLOR)
+        + _wins_table(big10_wins, "Big Ten", BIG10_COLOR)
+    )
+
+
 def _metric_legend_html() -> str:
     return """
 <div style='font-family:Arial,sans-serif;font-size:11px;color:#888;background:#f9f9f9;
@@ -254,6 +325,9 @@ def build_html(
     week: int,
     sec_response: str,
     year: int,
+    sec_top_wins: Optional[list[TopWin]] = None,
+    big10_top_wins: Optional[list[TopWin]] = None,
+    game_of_week: Optional[GameOfWeek] = None,
 ) -> str:
     next_sun = _next_sunday().strftime("%B %d, %Y")
 
@@ -293,10 +367,12 @@ def build_html(
   </div>
 
   <div style='padding:16px 18px;'>
+    {_game_of_week_html(game_of_week) if game_of_week else ""}
     {ai_section}
     {_metric_legend_html()}
     {_comparison_table_html(sec, big10)}
     {_cross_conf_table_html(cross_games, sec_response)}
+    {_top_wins_html(sec_top_wins or [], big10_top_wins or [])}
     {_standings_table_html(sec)}
     {_standings_table_html(big10)}
     <div style='border-top:1px solid #eee;margin-top:24px;padding-top:12px;
@@ -317,6 +393,9 @@ def build_text(
     h2h_leader_str: str,
     week: int,
     year: int,
+    sec_top_wins: Optional[list[TopWin]] = None,
+    big10_top_wins: Optional[list[TopWin]] = None,
+    game_of_week: Optional[GameOfWeek] = None,
 ) -> str:
     lines = [
         f"SECevaluator — {year} Season Week {week}",
@@ -350,12 +429,28 @@ def build_text(
     lines.append(f"{'CFP Top-25 Teams':<26} {sec.ranked_teams:>10} {big10.ranked_teams:>10}")
     lines.append("")
 
+    if game_of_week:
+        g = game_of_week
+        hsp = f"SP+ {g.home_sp:+.1f}" if g.home_sp is not None else ""
+        asp = f"SP+ {g.away_sp:+.1f}" if g.away_sp is not None else ""
+        lines += ["GAME OF THE WEEK", "-" * 30,
+                  f"  Wk {g.week} | {g.away_team} ({asp}) at {g.home_team} ({hsp}) — {g.game_date}", ""]
+
     played = [g for g in cross_games if g.played]
     if played:
         lines += ["CROSS-CONFERENCE RESULTS", "-" * 30]
         for g in played:
-            lines.append(f"  Wk {g.week:2d} | {g.score_str()}")
+            margin = abs((g.home_points or 0) - (g.away_points or 0))
+            lines.append(f"  Wk {g.week:2d} | {g.score_str()}  (+{margin})")
         lines.append("")
+
+    for wins, label in ((sec_top_wins or [], "SEC"), (big10_top_wins or [], "Big Ten")):
+        if wins:
+            lines += [f"{label} BEST WINS (by opponent SP+)", "-" * 30,
+                      f"  {'Wk':>3} {'Winner':<22} {'Opponent':<22} {'Score':>8} {'Opp SP+':>8}"]
+            for w in wins:
+                lines.append(f"  {w.week:>3} {w.team:<22} {w.opponent:<22} {w.score_str:>8} {w.opponent_sp:>+8.1f}")
+            lines.append("")
 
     for conf in (sec, big10):
         lines += [f"{conf.display} STANDINGS", "-" * 30,
@@ -380,10 +475,15 @@ def build_email(
     week: int,
     sec_response: str,
     year: int,
+    sec_top_wins: Optional[list[TopWin]] = None,
+    big10_top_wins: Optional[list[TopWin]] = None,
+    game_of_week: Optional[GameOfWeek] = None,
 ) -> tuple[str, str, str]:
     subject = f"SECevaluator {year} Wk {week} | {h2h_leader_str}"
-    text = build_text(sec, big10, cross_games, ai_text, h2h_leader_str, week, year)
-    html = build_html(sec, big10, cross_games, ai_text, h2h_leader_str, week, sec_response, year)
+    text = build_text(sec, big10, cross_games, ai_text, h2h_leader_str, week, year,
+                      sec_top_wins, big10_top_wins, game_of_week)
+    html = build_html(sec, big10, cross_games, ai_text, h2h_leader_str, week, sec_response, year,
+                      sec_top_wins, big10_top_wins, game_of_week)
     return subject, text, html
 
 

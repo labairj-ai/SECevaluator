@@ -263,3 +263,120 @@ def h2h_leader(sec: ConferenceStats, big10: ConferenceStats) -> str:
     if big10.h2h_wins > big10.h2h_losses:
         return f"Big Ten leads {big10.h2h_wins}-{big10.h2h_losses}"
     return f"Series tied {sec.h2h_wins}-{big10.h2h_wins}"
+
+
+# ── Top Wins ──────────────────────────────────────────────────────────────────
+
+@dataclass
+class TopWin:
+    team: str
+    conference_display: str
+    opponent: str
+    opponent_sp: float
+    winner_score: int
+    loser_score: int
+    week: int
+    margin: int
+
+    @property
+    def score_str(self) -> str:
+        return f"{self.winner_score}-{self.loser_score}"
+
+
+def compute_top_wins(
+    all_conf_games: list[dict],
+    conf_team_names: set[str],
+    sp_ratings: dict,
+    conference_display: str,
+    n: int = 5,
+) -> list[TopWin]:
+    """Top N wins by conference teams ranked by opponent SP+ at time of game."""
+    wins: list[TopWin] = []
+    seen: set = set()
+    for g in all_conf_games:
+        gid = g.get("id")
+        if gid in seen:
+            continue
+        seen.add(gid)
+
+        home  = g.get("homeTeam", "")
+        away  = g.get("awayTeam", "")
+        hp    = g.get("homePoints")
+        ap    = g.get("awayPoints")
+        if hp is None or ap is None or hp == ap:
+            continue
+
+        if home in conf_team_names and hp > ap:
+            winner, opponent, ws, ls = home, away, hp, ap
+        elif away in conf_team_names and ap > hp:
+            winner, opponent, ws, ls = away, home, ap, hp
+        else:
+            continue
+
+        opp_sp = (sp_ratings.get(opponent) or {}).get("rating")
+        if opp_sp is None:
+            continue
+
+        wins.append(TopWin(
+            team=winner,
+            conference_display=conference_display,
+            opponent=opponent,
+            opponent_sp=opp_sp,
+            winner_score=ws,
+            loser_score=ls,
+            week=g.get("week", 0),
+            margin=ws - ls,
+        ))
+
+    return sorted(wins, key=lambda w: -w.opponent_sp)[:n]
+
+
+# ── Game of the Week ──────────────────────────────────────────────────────────
+
+@dataclass
+class GameOfWeek:
+    week: int
+    home_team: str
+    home_conference: str
+    away_team: str
+    away_conference: str
+    home_sp: Optional[float]
+    away_sp: Optional[float]
+    game_date: str
+
+    @property
+    def combined_sp(self) -> float:
+        return (self.home_sp or 0) + (self.away_sp or 0)
+
+    @property
+    def matchup_str(self) -> str:
+        loc = "vs" if self.home_conference else "at"
+        return f"{self.away_team} at {self.home_team}"
+
+
+def compute_game_of_week(
+    cross_games: list[CrossGameResult],
+    sp_ratings: dict,
+) -> Optional[GameOfWeek]:
+    """Return the highest-quality upcoming SEC vs Big Ten matchup by combined SP+."""
+    upcoming = [g for g in cross_games if not g.played]
+    if not upcoming:
+        return None
+
+    best: Optional[GameOfWeek] = None
+    for g in upcoming:
+        home_sp = (sp_ratings.get(g.home_team) or {}).get("rating")
+        away_sp = (sp_ratings.get(g.away_team) or {}).get("rating")
+        candidate = GameOfWeek(
+            week=g.week,
+            home_team=g.home_team,
+            home_conference=g.home_conference,
+            away_team=g.away_team,
+            away_conference=g.away_conference,
+            home_sp=home_sp,
+            away_sp=away_sp,
+            game_date=g.game_date,
+        )
+        if best is None or candidate.combined_sp > best.combined_sp:
+            best = candidate
+    return best

@@ -16,6 +16,7 @@ from data_fetcher import fetch_all_data
 from metrics import (
     build_team_stats, build_cross_game_results,
     build_conference_stats, h2h_leader,
+    compute_top_wins, compute_game_of_week,
 )
 from ai_summary import generate_summary
 from email_builder import build_email, send_gmail
@@ -90,12 +91,21 @@ def main() -> None:
     leader_str = h2h_leader(sec_stats, big10_stats)
     log(f"H2H: {leader_str}")
 
+    sec_team_names   = {t.team for t in sec_teams}
+    big10_team_names = {t.team for t in big10_teams}
+    sec_top_wins   = compute_top_wins(data["sec_all_games"],   sec_team_names,   data["sp_ratings"], SEC_DISPLAY)
+    big10_top_wins = compute_top_wins(data["big10_all_games"], big10_team_names, data["sp_ratings"], BIG10_DISPLAY)
+    game_of_week   = compute_game_of_week(cross_results, data["sp_ratings"])
+    if game_of_week:
+        log(f"Game of the Week: {game_of_week.away_team} at {game_of_week.home_team} (Wk {game_of_week.week})")
+
     log("Requesting AI summary from Mac Studio...")
     ai_text = generate_summary(sec_stats, big10_stats, cross_results, leader_str, week)
     log("AI summary received." if ai_text else "AI summary unavailable.")
 
     subject, text_body, html_body = build_email(
-        sec_stats, big10_stats, cross_results, ai_text, leader_str, week, SEC_CONF_RESPONSE, year
+        sec_stats, big10_stats, cross_results, ai_text, leader_str, week, SEC_CONF_RESPONSE, year,
+        sec_top_wins, big10_top_wins, game_of_week,
     )
 
     recipients = TEST_TO_EMAILS if test_mode else RECIPIENTS
