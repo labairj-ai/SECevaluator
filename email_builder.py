@@ -87,6 +87,9 @@ def _standings_table_html(conf: ConferenceStats) -> str:
 <table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:12px;margin-bottom:20px;table-layout:fixed;'>
   <caption style='text-align:left;font-size:15px;font-weight:bold;color:{color};padding-bottom:5px;'>
     {conf.display} Standings
+    <span style='font-size:11px;font-weight:normal;color:#888;margin-left:8px;'>
+      <span style='background:#fff9c4;padding:1px 5px;border:1px solid #ddd;'>&#9632;</span> = CFP top 5
+    </span>
   </caption>
   <colgroup>
     <col style='width:42px;'>
