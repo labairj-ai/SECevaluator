@@ -10,18 +10,18 @@ from metrics import TeamStats, ConferenceStats, CrossGameResult
 
 
 # ── Colors ───────────────────────────────────────────────────────────────────
-SEC_COLOR = "#990000"     # crimson
-BIG10_COLOR = "#003087"   # navy
-HEADER_BG = "#1a1a2e"
-TABLE_HEADER_BG = "#2d2d44"
-ROW_ALT = "#f5f5f5"
-WIN_GREEN = "#c8f0c8"
-LOSS_RED = "#f7c5c5"
+SEC_COLOR    = "#990000"
+BIG10_COLOR  = "#003087"
+HEADER_BG    = "#1a1a2e"
+TABLE_HDR_BG = "#2d2d44"
+ROW_ALT      = "#f5f5f5"
+WIN_GREEN    = "#c8f0c8"
+LOSS_RED     = "#f7c5c5"
 
 
 def _next_sunday() -> date:
     today = date.today()
-    days_ahead = 6 - today.weekday()  # Sunday = 6
+    days_ahead = 6 - today.weekday()
     if days_ahead <= 0:
         days_ahead += 7
     return today + timedelta(days=days_ahead)
@@ -31,30 +31,39 @@ def _conf_color(conf_display: str) -> str:
     return SEC_COLOR if conf_display == "SEC" else BIG10_COLOR
 
 
+def _delta_str(d: Optional[float], higher_is_better: bool = True) -> str:
+    """Format a week-over-week delta with arrow and color."""
+    if d is None:
+        return ""
+    if abs(d) < 0.005:
+        return "<span style='color:#888;'>→ 0</span>"
+    arrow = "▲" if d > 0 else "▼"
+    color = "#228822" if (d > 0) == higher_is_better else "#cc2222"
+    return f"<span style='color:{color};font-size:11px;'>{arrow} {abs(d):.2f}</span>"
+
+
 # ── HTML helpers ─────────────────────────────────────────────────────────────
 
 def _td(content: str, bg: str = "", bold: bool = False, align: str = "left", color: str = "") -> str:
     style = f"padding:5px 10px;border:1px solid #ddd;text-align:{align};"
-    if bg:
-        style += f"background:{bg};"
-    if bold:
-        style += "font-weight:bold;"
-    if color:
-        style += f"color:{color};"
+    if bg:    style += f"background:{bg};"
+    if bold:  style += "font-weight:bold;"
+    if color: style += f"color:{color};"
     return f"<td style='{style}'>{content}</td>"
 
 
-def _th(content: str, bg: str = TABLE_HEADER_BG, color: str = "white") -> str:
-    return f"<th style='padding:6px 10px;border:1px solid #555;background:{bg};color:{color};text-align:left;'>{content}</th>"
+def _th(content: str, bg: str = TABLE_HDR_BG, color: str = "white", title: str = "") -> str:
+    tip = f" title='{title}'" if title else ""
+    return f"<th{tip} style='padding:6px 10px;border:1px solid #555;background:{bg};color:{color};text-align:left;cursor:default;'>{content}</th>"
 
 
-def _team_row(t: TeamStats, idx: int, highlight: bool = False) -> str:
-    bg = "#fff9c4" if highlight else (ROW_ALT if idx % 2 else "white")
-    rank_str = t.cfp_rank_str
-    rank_bold = t.cfp_rank is not None
+def _team_row(t: TeamStats, idx: int) -> str:
+    bg = ROW_ALT if idx % 2 else "white"
+    if t.cfp_rank and t.cfp_rank <= 5:
+        bg = "#fff9c4"
     return (
         "<tr>"
-        + _td(rank_str, bg=bg, bold=rank_bold, align="center")
+        + _td(t.cfp_rank_str, bg=bg, bold=bool(t.cfp_rank), align="center")
         + _td(t.team, bg=bg, bold=True)
         + _td(t.record_str, bg=bg)
         + _td(t.sp_str, bg=bg, align="right")
@@ -71,15 +80,13 @@ def _standings_table_html(conf: ConferenceStats) -> str:
   <caption style='text-align:left;font-size:16px;font-weight:bold;color:{color};padding-bottom:6px;'>
     {conf.display} Standings
   </caption>
-  <thead>
-    <tr>
-      {_th("CFP")}
-      {_th("Team")}
-      {_th("Record (Conf)")}
-      {_th("SP+")}
-      {_th("SOS")}
-    </tr>
-  </thead>
+  <thead><tr>
+    {_th("CFP", title="College Football Playoff ranking. Top 25 teams; — means unranked.")}
+    {_th("Team")}
+    {_th("Record (Conf)")}
+    {_th("SP+", title="SP+ is ESPN's predictive team rating adjusted for opponent strength. National average = 0. +10 means roughly 10 points better than average per game.")}
+    {_th("SOS", title="Strength of Schedule — measures how tough a team's slate of opponents has been. Higher = harder schedule.")}
+  </tr></thead>
   <tbody>{rows}</tbody>
 </table>
 """
@@ -88,18 +95,18 @@ def _standings_table_html(conf: ConferenceStats) -> str:
 def _cross_conf_table_html(cross_games: list[CrossGameResult], sec_response: str) -> str:
     played = [g for g in cross_games if g.played]
     if not played:
-        return "<p style='color:#666;font-style:italic;'>No cross-conference games played yet.</p>"
+        return "<p style='color:#666;font-style:italic;font-family:Arial,sans-serif;'>No cross-conference games played yet.</p>"
 
     rows = ""
     for g in played:
         sec_won = g.sec_won(sec_response)
         result_bg = WIN_GREEN if sec_won else LOSS_RED
         winner = g.winner() or ""
-        loser = g.away_team if winner == g.home_team else g.home_team
-        pts_w = g.home_points if winner == g.home_team else g.away_points
-        pts_l = g.away_points if winner == g.home_team else g.home_points
-        loc = " (N)" if g.neutral_site else ""
-        score = f"{winner} {pts_w}, {loser} {pts_l}{loc}"
+        loser  = g.away_team if winner == g.home_team else g.home_team
+        pts_w  = g.home_points if winner == g.home_team else g.away_points
+        pts_l  = g.away_points if winner == g.home_team else g.home_points
+        loc    = " (N)" if g.neutral_site else ""
+        score  = f"{winner} {pts_w}, {loser} {pts_l}{loc}"
         conf_w = g.home_conference if winner == g.home_team else g.away_conference
         rows += (
             "<tr>"
@@ -114,34 +121,30 @@ def _cross_conf_table_html(cross_games: list[CrossGameResult], sec_response: str
 <table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px;margin-bottom:20px;'>
   <caption style='text-align:left;font-size:16px;font-weight:bold;color:#333;padding-bottom:6px;'>
     SEC vs Big Ten Cross-Conference Results
+    <span style='font-size:12px;font-weight:normal;color:#888;margin-left:8px;'>
+      (Green = SEC win, Red = Big Ten win)
+    </span>
   </caption>
-  <thead>
-    <tr>
-      {_th("Week")}
-      {_th("Date")}
-      {_th("Result")}
-      {_th("Winner")}
-    </tr>
-  </thead>
+  <thead><tr>
+    {_th("Week")} {_th("Date")} {_th("Result")} {_th("Winner")}
+  </tr></thead>
   <tbody>{rows}</tbody>
 </table>
 """
 
 
 def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
-    def _row(label: str, sec_val: str, big10_val: str, sec_better: Optional[bool] = None) -> str:
-        sec_bg = WIN_GREEN if sec_better is True else (LOSS_RED if sec_better is False else "white")
-        b10_bg = WIN_GREEN if sec_better is False else (LOSS_RED if sec_better is True else "white")
-        return (
-            f"<tr>"
-            f"<td style='padding:5px 10px;font-weight:bold;border:1px solid #ddd;'>{label}</td>"
-            f"<td style='padding:5px 10px;text-align:center;border:1px solid #ddd;background:{sec_bg};'>{sec_val}</td>"
-            f"<td style='padding:5px 10px;text-align:center;border:1px solid #ddd;background:{b10_bg};'>{big10_val}</td>"
-            f"</tr>"
-        )
+    def _row(label: str, sec_val: str, big10_val: str, sec_better: Optional[bool] = None,
+             sec_delta: str = "", b10_delta: str = "", tip: str = "") -> str:
+        sec_bg  = WIN_GREEN if sec_better is True  else (LOSS_RED if sec_better is False else "white")
+        b10_bg  = WIN_GREEN if sec_better is False else (LOSS_RED if sec_better is True  else "white")
+        label_td = f"<td style='padding:5px 10px;font-weight:bold;border:1px solid #ddd;' title='{tip}'>{label}</td>"
+        sec_cell  = f"<td style='padding:5px 10px;text-align:center;border:1px solid #ddd;background:{sec_bg};'>{sec_val}<br>{sec_delta}</td>"
+        b10_cell  = f"<td style='padding:5px 10px;text-align:center;border:1px solid #ddd;background:{b10_bg};'>{big10_val}<br>{b10_delta}</td>"
+        return f"<tr>{label_td}{sec_cell}{b10_cell}</tr>"
 
-    sec_sp = sec.avg_sp_rating
-    b10_sp = big10.avg_sp_rating
+    sec_sp  = sec.avg_sp_rating
+    b10_sp  = big10.avg_sp_rating
     sec_sos = sec.avg_sos
     b10_sos = big10.avg_sos
 
@@ -150,44 +153,67 @@ def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
             "H2H Record",
             f"{sec.h2h_wins}-{sec.h2h_losses}",
             f"{big10.h2h_wins}-{big10.h2h_losses}",
-            sec_better=sec.h2h_wins > sec.h2h_losses if (sec.h2h_wins + sec.h2h_losses) > 0 else None,
+            sec_better=(sec.h2h_wins > sec.h2h_losses) if (sec.h2h_wins + sec.h2h_losses) > 0 else None,
+            tip="Head-to-head record in games between SEC and Big Ten teams this season.",
         ),
         _row(
             "Overall Record",
             f"{sec.total_wins}-{sec.total_losses}",
             f"{big10.total_wins}-{big10.total_losses}",
-            sec_better=None,
+            tip="Combined wins and losses for all teams in each conference.",
         ),
         _row(
-            "Avg SP+ Rating",
+            "Avg SP+ ↑ better",
             f"{sec_sp:+.1f}" if sec_sp is not None else "N/A",
             f"{b10_sp:+.1f}" if b10_sp is not None else "N/A",
-            sec_better=(sec_sp > b10_sp) if (sec_sp is not None and b10_sp is not None) else None,
+            sec_better=(sec_sp > b10_sp) if (sec_sp and b10_sp) else None,
+            sec_delta=_delta_str(sec.d_avg_sp, higher_is_better=True),
+            b10_delta=_delta_str(big10.d_avg_sp, higher_is_better=True),
+            tip="SP+ is ESPN's predictive team quality rating, adjusted for opponent strength. National average = 0. Higher = better. Shows average across all conference teams.",
         ),
         _row(
-            "Avg SOS",
+            "Avg SOS ↑ harder",
             f"{sec_sos:.2f}" if sec_sos is not None else "N/A",
             f"{b10_sos:.2f}" if b10_sos is not None else "N/A",
-            sec_better=(sec_sos > b10_sos) if (sec_sos is not None and b10_sos is not None) else None,
+            sec_better=(sec_sos > b10_sos) if (sec_sos and b10_sos) else None,
+            sec_delta=_delta_str(sec.d_avg_sos, higher_is_better=True),
+            b10_delta=_delta_str(big10.d_avg_sos, higher_is_better=True),
+            tip="Strength of Schedule — how difficult each conference's average opponent slate has been. Higher = harder schedule. Arrows show change vs last week.",
         ),
-        _row("CFP Ranked Teams", str(sec.ranked_teams), str(big10.ranked_teams),
-             sec_better=sec.ranked_teams > big10.ranked_teams if sec.ranked_teams != big10.ranked_teams else None),
+        _row(
+            "CFP Top-25 Teams",
+            str(sec.ranked_teams),
+            str(big10.ranked_teams),
+            sec_better=sec.ranked_teams > big10.ranked_teams if sec.ranked_teams != big10.ranked_teams else None,
+            tip="Number of teams ranked in the College Football Playoff top 25.",
+        ),
     ]
 
     return f"""
 <table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px;margin-bottom:20px;'>
   <caption style='text-align:left;font-size:16px;font-weight:bold;color:#333;padding-bottom:6px;'>
     Conference Comparison
+    <span style='font-size:11px;font-weight:normal;color:#888;margin-left:8px;'>▲▼ = change vs last week</span>
   </caption>
-  <thead>
-    <tr>
-      {_th("Metric")}
-      {_th("SEC", bg=SEC_COLOR)}
-      {_th("Big Ten", bg=BIG10_COLOR)}
-    </tr>
-  </thead>
+  <thead><tr>
+    {_th("Metric")}
+    {_th("SEC", bg=SEC_COLOR)}
+    {_th("Big Ten", bg=BIG10_COLOR)}
+  </tr></thead>
   <tbody>{"".join(rows)}</tbody>
 </table>
+"""
+
+
+def _metric_legend_html() -> str:
+    return """
+<div style='font-family:Arial,sans-serif;font-size:11px;color:#888;background:#f9f9f9;
+            border:1px solid #e0e0e0;border-radius:4px;padding:10px 14px;margin-bottom:20px;'>
+  <strong style='color:#555;'>Metric Guide:</strong>
+  <span style='margin-left:12px;'><strong>SP+</strong> — ESPN's predictive rating adjusted for opponent quality. 0 = average FBS team; +10 means ~10 pts/game better than average.</span>
+  <span style='margin-left:12px;'><strong>SOS</strong> — Strength of Schedule. Higher = tougher slate of opponents faced. Arrows (▲▼) show week-over-week change.</span>
+  <span style='margin-left:12px;'><strong>CFP Rank</strong> — College Football Playoff committee ranking. Top 12 earn automatic playoff bids.</span>
+</div>
 """
 
 
@@ -199,15 +225,22 @@ def build_html(
     h2h_leader_str: str,
     week: int,
     sec_response: str,
+    year: int,
 ) -> str:
     next_sun = _next_sunday().strftime("%B %d, %Y")
 
-    ai_section = ""
     if ai_text:
-        paragraphs = "\n".join(f"<p style='margin:10px 0;'>{p.strip()}</p>" for p in ai_text.split("\n\n") if p.strip())
+        paragraphs = "\n".join(
+            f"<p style='margin:10px 0;'>{p.strip()}</p>"
+            for p in ai_text.split("\n\n") if p.strip()
+        )
         ai_section = f"""
-<div style='background:#f0f4ff;border-left:4px solid #6688cc;padding:16px 20px;margin-bottom:24px;border-radius:4px;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;'>
-  <div style='font-weight:bold;font-size:15px;margin-bottom:10px;color:#334;'>AI Analysis — 70B Conference Breakdown</div>
+<div style='background:#f0f4ff;border-left:4px solid #6688cc;padding:16px 20px;
+            margin-bottom:24px;border-radius:4px;font-family:Arial,sans-serif;
+            font-size:14px;line-height:1.6;'>
+  <div style='font-weight:bold;font-size:14px;margin-bottom:8px;color:#334;'>
+    AI Analysis — Conference War Breakdown
+  </div>
   {paragraphs}
 </div>
 """
@@ -217,38 +250,31 @@ def build_html(
     return f"""<!DOCTYPE html>
 <html>
 <body style='margin:0;padding:0;background:#f0f0f0;'>
-<div style='max-width:700px;margin:20px auto;background:white;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.15);font-family:Arial,sans-serif;'>
+<div style='max-width:700px;margin:20px auto;background:white;border-radius:8px;
+            overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.15);font-family:Arial,sans-serif;'>
 
-  <!-- Header -->
   <div style='background:{HEADER_BG};color:white;padding:24px 28px;'>
-    <div style='font-size:22px;font-weight:bold;letter-spacing:1px;'>⚔ SEC vs Big Ten — Conference War</div>
-    <div style='font-size:14px;margin-top:6px;opacity:0.8;'>Week {week} Report</div>
-    <div style='margin-top:14px;font-size:18px;font-weight:bold;'>
+    <div style='font-size:21px;font-weight:bold;letter-spacing:0.5px;'>⚔ SEC vs Big Ten — Conference War</div>
+    <div style='font-size:13px;margin-top:4px;opacity:0.7;'>{year} Season &bull; Week {week} Report</div>
+    <div style='margin-top:12px;font-size:17px;font-weight:bold;'>
       <span style='color:#ff9999;'>SEC</span>
-      <span style='margin:0 10px;opacity:0.6;'>vs</span>
+      <span style='margin:0 10px;opacity:0.5;'>vs</span>
       <span style='color:#99bbff;'>Big Ten</span>
-      <span style='margin-left:20px;font-size:16px;font-weight:normal;opacity:0.9;'>{h2h_leader_str}</span>
+      <span style='margin-left:18px;font-size:14px;font-weight:normal;opacity:0.85;'>{h2h_leader_str}</span>
     </div>
   </div>
 
-  <!-- Body -->
   <div style='padding:24px 28px;'>
-
     {ai_section}
-
+    {_metric_legend_html()}
     {_comparison_table_html(sec, big10)}
-
     {_cross_conf_table_html(cross_games, sec_response)}
-
     {_standings_table_html(sec)}
-
     {_standings_table_html(big10)}
-
-    <!-- Footer -->
-    <div style='border-top:1px solid #eee;margin-top:24px;padding-top:14px;font-size:12px;color:#999;text-align:center;'>
-      SECevaluator &bull; Next email: Sunday {next_sun} &bull; Data: CollegeFootballData.com
+    <div style='border-top:1px solid #eee;margin-top:24px;padding-top:12px;
+                font-size:11px;color:#aaa;text-align:center;'>
+      SECevaluator &bull; Next email: {next_sun} &bull; Data: CollegeFootballData.com
     </div>
-
   </div>
 </div>
 </body>
@@ -262,47 +288,55 @@ def build_text(
     ai_text: Optional[str],
     h2h_leader_str: str,
     week: int,
+    year: int,
 ) -> str:
-    lines = []
-    lines.append(f"SECevaluator — Week {week} Report")
-    lines.append("=" * 50)
-    lines.append(f"SEC vs Big Ten H2H: {h2h_leader_str}")
-    lines.append("")
-
+    lines = [
+        f"SECevaluator — {year} Season Week {week}",
+        "=" * 50,
+        f"SEC vs Big Ten H2H: {h2h_leader_str}",
+        "",
+    ]
     if ai_text:
-        lines.append("AI ANALYSIS")
-        lines.append("-" * 30)
-        lines.append(ai_text)
-        lines.append("")
+        lines += ["AI ANALYSIS", "-" * 30, ai_text, ""]
 
-    lines.append("CONFERENCE COMPARISON")
-    lines.append("-" * 30)
-    lines.append(f"{'Metric':<25} {'SEC':>10} {'Big Ten':>10}")
-    lines.append(f"{'H2H Record':<25} {sec.h2h_wins}-{sec.h2h_losses:>8} {big10.h2h_wins}-{big10.h2h_losses:>8}")
-    lines.append(f"{'Overall Record':<25} {sec.total_wins}-{sec.total_losses:>8} {big10.total_wins}-{big10.total_losses:>8}")
-    if sec.avg_sp_rating is not None and big10.avg_sp_rating is not None:
-        lines.append(f"{'Avg SP+':<25} {sec.avg_sp_rating:>+10.1f} {big10.avg_sp_rating:>+10.1f}")
-    lines.append(f"{'CFP Ranked Teams':<25} {sec.ranked_teams:>10} {big10.ranked_teams:>10}")
+    lines += ["CONFERENCE COMPARISON (SP+ = quality rating, 0=avg; SOS = schedule difficulty, higher=harder)", "-" * 30]
+    sp_note = "(▲▼ = change vs last week)"
+    lines.append(f"{'Metric':<26} {'SEC':>10} {'Big Ten':>10}  {sp_note}")
+
+    def _fmt_delta(d):
+        if d is None: return ""
+        if abs(d) < 0.005: return "→0"
+        return f"{'▲' if d>0 else '▼'}{abs(d):.2f}"
+
+    lines.append(f"{'H2H Record':<26} {sec.h2h_wins}-{sec.h2h_losses:>9} {big10.h2h_wins}-{big10.h2h_losses:>9}")
+    lines.append(f"{'Overall Record':<26} {sec.total_wins}-{sec.total_losses:>9} {big10.total_wins}-{big10.total_losses:>9}")
+    if sec.avg_sp_rating and big10.avg_sp_rating:
+        d1 = _fmt_delta(sec.d_avg_sp)
+        d2 = _fmt_delta(big10.d_avg_sp)
+        lines.append(f"{'Avg SP+':<26} {sec.avg_sp_rating:>+10.1f} {big10.avg_sp_rating:>+10.1f}  {d1} / {d2}")
+    if sec.avg_sos and big10.avg_sos:
+        d1 = _fmt_delta(sec.d_avg_sos)
+        d2 = _fmt_delta(big10.d_avg_sos)
+        lines.append(f"{'Avg SOS':<26} {sec.avg_sos:>10.2f} {big10.avg_sos:>10.2f}  {d1} / {d2}")
+    lines.append(f"{'CFP Top-25 Teams':<26} {sec.ranked_teams:>10} {big10.ranked_teams:>10}")
     lines.append("")
 
     played = [g for g in cross_games if g.played]
     if played:
-        lines.append("CROSS-CONFERENCE RESULTS")
-        lines.append("-" * 30)
+        lines += ["CROSS-CONFERENCE RESULTS", "-" * 30]
         for g in played:
             lines.append(f"  Wk {g.week:2d} | {g.score_str()}")
         lines.append("")
 
     for conf in (sec, big10):
-        lines.append(f"{conf.display} STANDINGS")
-        lines.append("-" * 30)
-        lines.append(f"  {'Team':<25} {'Record':<15} {'SP+':>6} {'CFP':>6}")
+        lines += [f"{conf.display} STANDINGS", "-" * 30,
+                  f"  {'Team':<25} {'Record':<15} {'SP+':>6} {'SOS':>6} {'CFP':>5}"]
         for t in conf.teams:
-            rank = f"#{t.cfp_rank}" if t.cfp_rank else ""
-            lines.append(f"  {t.team:<25} {t.record_str:<15} {t.sp_str:>6} {rank:>6}")
+            rank = t.cfp_rank_str
+            lines.append(f"  {t.team:<25} {t.record_str:<15} {t.sp_str:>6} {t.sos_str:>6} {rank:>5}")
         lines.append("")
 
-    lines.append(f"Next email: Sunday {_next_sunday().strftime('%B %d, %Y')}")
+    lines.append(f"Next email: {_next_sunday().strftime('%B %d, %Y')}")
     return "\n".join(lines)
 
 
@@ -314,10 +348,11 @@ def build_email(
     h2h_leader_str: str,
     week: int,
     sec_response: str,
+    year: int,
 ) -> tuple[str, str, str]:
-    subject = f"SECevaluator — Wk {week} | {h2h_leader_str}"
-    text = build_text(sec, big10, cross_games, ai_text, h2h_leader_str, week)
-    html = build_html(sec, big10, cross_games, ai_text, h2h_leader_str, week, sec_response)
+    subject = f"SECevaluator {year} Wk {week} | {h2h_leader_str}"
+    text = build_text(sec, big10, cross_games, ai_text, h2h_leader_str, week, year)
+    html = build_html(sec, big10, cross_games, ai_text, h2h_leader_str, week, sec_response, year)
     return subject, text, html
 
 
@@ -344,8 +379,8 @@ def send_gmail(sender: str, recipients: list[str], subject: str, text_body: str,
     if not sender:
         raise ValueError("SENDER_EMAIL is empty.")
     msg = MIMEMultipart("alternative")
-    msg["To"] = ", ".join(recipients)
-    msg["From"] = sender
+    msg["To"]      = ", ".join(recipients)
+    msg["From"]    = sender
     msg["Subject"] = subject
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))

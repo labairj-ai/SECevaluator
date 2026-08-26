@@ -12,7 +12,7 @@ class TeamStats:
     conf_losses: int = 0
     sp_rating: Optional[float] = None
     sp_rank: Optional[int] = None
-    sos_rating: Optional[float] = None
+    sos_ooc: Optional[float] = None    # avg SP+ of non-conference opponents
     cfp_rank: Optional[int] = None
 
     @property
@@ -22,8 +22,7 @@ class TeamStats:
 
     @property
     def record_str(self) -> str:
-        conf = f"{self.conf_wins}-{self.conf_losses}"
-        return f"{self.overall_wins}-{self.overall_losses} ({conf})"
+        return f"{self.overall_wins}-{self.overall_losses} ({self.conf_wins}-{self.conf_losses})"
 
     @property
     def cfp_rank_str(self) -> str:
@@ -31,15 +30,11 @@ class TeamStats:
 
     @property
     def sp_str(self) -> str:
-        if self.sp_rating is None:
-            return "N/A"
-        return f"{self.sp_rating:+.1f}" if self.sp_rating else "N/A"
+        return f"{self.sp_rating:+.1f}" if self.sp_rating is not None else "N/A"
 
     @property
     def sos_str(self) -> str:
-        if self.sos_rating is None:
-            return "N/A"
-        return f"{self.sos_rating:.2f}"
+        return f"{self.sos_ooc:+.1f}" if self.sos_ooc is not None else "N/A"
 
 
 @dataclass
@@ -67,13 +62,17 @@ class CrossGameResult:
         if not self.played:
             return "TBD"
         loc = " (N)" if self.neutral_site else ""
-        return f"{self.home_team} {self.home_points}, {self.away_team} {self.away_points}{loc}"
+        winner = self.winner()
+        loser  = self.away_team if winner == self.home_team else self.home_team
+        pts_w  = self.home_points if winner == self.home_team else self.away_points
+        pts_l  = self.away_points if winner == self.home_team else self.home_points
+        return f"{winner} {pts_w}, {loser} {pts_l}{loc}"
 
-    def sec_won(self, sec_response_name: str) -> Optional[bool]:
+    def sec_won(self, sec_conf_response: str) -> Optional[bool]:
         winner = self.winner()
         if winner is None:
             return None
-        if self.home_conference == sec_response_name:
+        if self.home_conference == sec_conf_response:
             return winner == self.home_team
         return winner == self.away_team
 
@@ -85,6 +84,8 @@ class ConferenceStats:
     teams: list[TeamStats] = field(default_factory=list)
     h2h_wins: int = 0
     h2h_losses: int = 0
+    d_avg_sp: Optional[float] = None
+    d_avg_sos: Optional[float] = None
 
     @property
     def ranked_teams(self) -> int:
@@ -93,12 +94,12 @@ class ConferenceStats:
     @property
     def avg_sp_rating(self) -> Optional[float]:
         rated = [t.sp_rating for t in self.teams if t.sp_rating is not None]
-        return sum(rated) / len(rated) if rated else None
+        return round(sum(rated) / len(rated), 2) if rated else None
 
     @property
     def avg_sos(self) -> Optional[float]:
-        rated = [t.sos_rating for t in self.teams if t.sos_rating is not None]
-        return sum(rated) / len(rated) if rated else None
+        rated = [t.sos_ooc for t in self.teams if t.sos_ooc is not None]
+        return round(sum(rated) / len(rated), 2) if rated else None
 
     @property
     def total_wins(self) -> int:
@@ -122,20 +123,50 @@ class ConferenceStats:
         return sorted(ranked, key=lambda t: t.cfp_rank)[:5]
 
 
+def _compute_ooc_sos(
+    team_name: str,
+    conf_team_names: set[str],
+    all_conf_games: list[dict],
+    sp_ratings: dict,
+) -> Optional[float]:
+    """Average SP+ rating of non-conference opponents faced by this team."""
+    opponent_sp: list[float] = []
+    for g in all_conf_games:
+        home = g.get("homeTeam", "")
+        away = g.get("awayTeam", "")
+        if home == team_name:
+            opponent = away
+        elif away == team_name:
+            opponent = home
+        else:
+            continue
+        if opponent in conf_team_names:
+            continue  # skip intra-conference opponents
+        if g.get("homePoints") is None:
+            continue  # game not yet played
+        sp = sp_ratings.get(opponent, {})
+        if sp and sp.get("rating") is not None:
+            opponent_sp.append(sp["rating"])
+    return round(sum(opponent_sp) / len(opponent_sp), 2) if opponent_sp else None
+
+
 def build_team_stats(
     records: list[dict],
+    all_conf_games: list[dict],
     sp_ratings: dict,
-    sos_ratings: dict,
     rankings: dict,
     conference_display: str,
 ) -> list[TeamStats]:
+    team_names = {r.get("team", "") for r in records}
+
     teams = []
     for row in records:
         team_name = row.get("team", "")
         total = row.get("total", {})
-        conf = row.get("conferenceGames", {})
-        sp = sp_ratings.get(team_name, {})
-        sos = sos_ratings.get(team_name, {})
+        conf  = row.get("conferenceGames", {})
+        sp    = sp_ratings.get(team_name, {})
+
+        sos = _compute_ooc_sos(team_name, team_names, all_conf_games, sp_ratings)
 
         ts = TeamStats(
             team=team_name,
@@ -146,7 +177,7 @@ def build_team_stats(
             conf_losses=conf.get("losses", 0),
             sp_rating=sp.get("rating"),
             sp_rank=sp.get("ranking"),
-            sos_rating=sos.get("currentRating") if sos else None,
+            sos_ooc=sos,
             cfp_rank=rankings.get(team_name),
         )
         teams.append(ts)
@@ -155,21 +186,19 @@ def build_team_stats(
 
 
 def build_cross_game_results(raw_games: list[dict]) -> list[CrossGameResult]:
+    """Build CrossGameResult list from raw API game dicts (camelCase fields)."""
     results = []
     for g in raw_games:
-        if g.get("home_points") is None and g.get("away_points") is None:
-            # skip future games
-            pass
         results.append(CrossGameResult(
             week=g.get("week", 0),
-            home_team=g.get("home_team", ""),
-            home_conference=g.get("home_conference", ""),
-            away_team=g.get("away_team", ""),
-            away_conference=g.get("away_conference", ""),
-            home_points=g.get("home_points"),
-            away_points=g.get("away_points"),
-            neutral_site=g.get("neutral_site", False),
-            game_date=(g.get("start_date") or "")[:10],
+            home_team=g.get("homeTeam", ""),
+            home_conference=g.get("homeConference", ""),
+            away_team=g.get("awayTeam", ""),
+            away_conference=g.get("awayConference", ""),
+            home_points=g.get("homePoints"),
+            away_points=g.get("awayPoints"),
+            neutral_site=g.get("neutralSite", False),
+            game_date=(g.get("startDate") or "")[:10],
         ))
     return sorted(results, key=lambda g: (g.week, g.game_date))
 
@@ -179,32 +208,34 @@ def build_conference_stats(
     display: str,
     teams: list[TeamStats],
     cross_games: list[CrossGameResult],
-    sec_response_name: str,
+    sec_conf_response: str,
 ) -> ConferenceStats:
     stats = ConferenceStats(name=name, display=display, teams=teams)
-    is_sec = (name == sec_response_name)
+    is_sec = (name == sec_conf_response)
     for game in cross_games:
         if not game.played:
             continue
-        sec_won = game.sec_won(sec_response_name)
+        sec_won = game.sec_won(sec_conf_response)
         if sec_won is None:
             continue
         if is_sec:
-            stats.h2h_wins += 1 if sec_won else 0
-            stats.h2h_losses += 0 if sec_won else 1
+            if sec_won:
+                stats.h2h_wins += 1
+            else:
+                stats.h2h_losses += 1
         else:
-            stats.h2h_wins += 0 if sec_won else 1
-            stats.h2h_losses += 1 if sec_won else 0
+            if sec_won:
+                stats.h2h_losses += 1
+            else:
+                stats.h2h_wins += 1
     return stats
 
 
 def h2h_leader(sec: ConferenceStats, big10: ConferenceStats) -> str:
+    if sec.h2h_wins == 0 and sec.h2h_losses == 0:
+        return "No cross-conference games played yet"
     if sec.h2h_wins > sec.h2h_losses:
-        margin = sec.h2h_wins - sec.h2h_losses
-        return f"SEC leads {sec.h2h_wins}-{sec.h2h_losses} ({margin} game advantage)"
-    elif big10.h2h_wins > big10.h2h_losses:
-        margin = big10.h2h_wins - big10.h2h_losses
-        return f"Big Ten leads {big10.h2h_wins}-{big10.h2h_losses} ({margin} game advantage)"
-    elif sec.h2h_wins > 0:
-        return f"Series tied {sec.h2h_wins}-{big10.h2h_wins}"
-    return "No cross-conference games played yet"
+        return f"SEC leads {sec.h2h_wins}-{sec.h2h_losses}"
+    if big10.h2h_wins > big10.h2h_losses:
+        return f"Big Ten leads {big10.h2h_wins}-{big10.h2h_losses}"
+    return f"Series tied {sec.h2h_wins}-{big10.h2h_wins}"
