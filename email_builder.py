@@ -65,7 +65,9 @@ def _team_row(t: TeamStats, idx: int) -> str:
         "<tr>"
         + _td(t.cfp_rank_str, bg=bg, bold=bool(t.cfp_rank), align="center")
         + _td(t.team, bg=bg, bold=True)
-        + _td(t.record_str, bg=bg)
+        + _td(t.record_str, bg=bg, align="center")
+        + _td(t.conf_record_str, bg=bg, align="center")
+        + _td(t.nonconf_record_str, bg=bg, align="center")
         + _td(t.sp_str, bg=bg, align="right")
         + _td(t.sos_str, bg=bg, align="right")
         + "</tr>"
@@ -83,9 +85,11 @@ def _standings_table_html(conf: ConferenceStats) -> str:
   <thead><tr>
     {_th("CFP", title="College Football Playoff ranking. Top 25 teams; — means unranked.")}
     {_th("Team")}
-    {_th("Record (Conf)")}
+    {_th("Overall", title="Total wins-losses across all games.")}
+    {_th("Conf", title="Record against teams within the same conference.")}
+    {_th("External", title="Record against non-conference opponents only — excludes games between teams in the same conference.")}
     {_th("SP+", title="SP+ is ESPN's predictive team rating adjusted for opponent strength. National average = 0. +10 means roughly 10 points better than average per game.")}
-    {_th("SOS", title="Strength of Schedule — measures how tough a team's slate of opponents has been. Higher = harder schedule.")}
+    {_th("OOC SOS", title="Out-of-Conference Strength of Schedule: average SP+ rating of non-conference opponents faced. Higher = tougher external slate.")}
   </tr></thead>
   <tbody>{rows}</tbody>
 </table>
@@ -160,7 +164,16 @@ def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
             "Overall Record",
             f"{sec.total_wins}-{sec.total_losses}",
             f"{big10.total_wins}-{big10.total_losses}",
-            tip="Combined wins and losses for all teams in each conference.",
+            tip="Combined wins and losses across all games, including within-conference matchups.",
+        ),
+        _row(
+            "External Record",
+            f"{sec.nonconf_wins}-{sec.nonconf_losses}",
+            f"{big10.nonconf_wins}-{big10.nonconf_losses}",
+            sec_better=(sec.nonconf_wins / max(sec.nonconf_wins + sec.nonconf_losses, 1)) >
+                       (big10.nonconf_wins / max(big10.nonconf_wins + big10.nonconf_losses, 1))
+                       if (sec.nonconf_wins + sec.nonconf_losses + big10.nonconf_wins + big10.nonconf_losses) > 0 else None,
+            tip="Record against non-conference opponents only — same-conference games (SEC vs SEC, Big Ten vs Big Ten) are excluded.",
         ),
         _row(
             "Avg SP+ ↑ better",
@@ -210,8 +223,9 @@ def _metric_legend_html() -> str:
 <div style='font-family:Arial,sans-serif;font-size:11px;color:#888;background:#f9f9f9;
             border:1px solid #e0e0e0;border-radius:4px;padding:10px 14px;margin-bottom:20px;'>
   <strong style='color:#555;'>Metric Guide:</strong>
+  <span style='margin-left:12px;'><strong>External</strong> — wins/losses vs non-conference opponents only; same-conference games excluded.</span>
   <span style='margin-left:12px;'><strong>SP+</strong> — ESPN's predictive rating adjusted for opponent quality. 0 = average FBS team; +10 means ~10 pts/game better than average.</span>
-  <span style='margin-left:12px;'><strong>SOS</strong> — Strength of Schedule. Higher = tougher slate of opponents faced. Arrows (▲▼) show week-over-week change.</span>
+  <span style='margin-left:12px;'><strong>OOC SOS</strong> — avg SP+ of non-conference opponents faced. Higher = harder external schedule. Arrows (▲▼) show week-over-week change.</span>
   <span style='margin-left:12px;'><strong>CFP Rank</strong> — College Football Playoff committee ranking. Top 12 earn automatic playoff bids.</span>
 </div>
 """
@@ -310,6 +324,7 @@ def build_text(
 
     lines.append(f"{'H2H Record':<26} {sec.h2h_wins}-{sec.h2h_losses:>9} {big10.h2h_wins}-{big10.h2h_losses:>9}")
     lines.append(f"{'Overall Record':<26} {sec.total_wins}-{sec.total_losses:>9} {big10.total_wins}-{big10.total_losses:>9}")
+    lines.append(f"{'External Record (OOC)':<26} {sec.nonconf_wins}-{sec.nonconf_losses:>9} {big10.nonconf_wins}-{big10.nonconf_losses:>9}")
     if sec.avg_sp_rating and big10.avg_sp_rating:
         d1 = _fmt_delta(sec.d_avg_sp)
         d2 = _fmt_delta(big10.d_avg_sp)
@@ -330,10 +345,12 @@ def build_text(
 
     for conf in (sec, big10):
         lines += [f"{conf.display} STANDINGS", "-" * 30,
-                  f"  {'Team':<25} {'Record':<15} {'SP+':>6} {'SOS':>6} {'CFP':>5}"]
+                  f"  {'Team':<25} {'Overall':>8} {'Conf':>6} {'External':>9} {'SP+':>6} {'OOC SOS':>8} {'CFP':>5}"]
         for t in conf.teams:
-            rank = t.cfp_rank_str
-            lines.append(f"  {t.team:<25} {t.record_str:<15} {t.sp_str:>6} {t.sos_str:>6} {rank:>5}")
+            lines.append(
+                f"  {t.team:<25} {t.record_str:>8} {t.conf_record_str:>6}"
+                f" {t.nonconf_record_str:>9} {t.sp_str:>6} {t.sos_str:>8} {t.cfp_rank_str:>5}"
+            )
         lines.append("")
 
     lines.append(f"Next email: {_next_sunday().strftime('%B %d, %Y')}")

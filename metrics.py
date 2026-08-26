@@ -16,13 +16,29 @@ class TeamStats:
     cfp_rank: Optional[int] = None
 
     @property
+    def nonconf_wins(self) -> int:
+        return max(0, self.overall_wins - self.conf_wins)
+
+    @property
+    def nonconf_losses(self) -> int:
+        return max(0, self.overall_losses - self.conf_losses)
+
+    @property
     def win_pct(self) -> float:
         total = self.overall_wins + self.overall_losses
         return self.overall_wins / total if total else 0.0
 
     @property
     def record_str(self) -> str:
-        return f"{self.overall_wins}-{self.overall_losses} ({self.conf_wins}-{self.conf_losses})"
+        return f"{self.overall_wins}-{self.overall_losses}"
+
+    @property
+    def conf_record_str(self) -> str:
+        return f"{self.conf_wins}-{self.conf_losses}"
+
+    @property
+    def nonconf_record_str(self) -> str:
+        return f"{self.nonconf_wins}-{self.nonconf_losses}"
 
     @property
     def cfp_rank_str(self) -> str:
@@ -108,6 +124,14 @@ class ConferenceStats:
     @property
     def total_losses(self) -> int:
         return sum(t.overall_losses for t in self.teams)
+
+    @property
+    def nonconf_wins(self) -> int:
+        return sum(t.nonconf_wins for t in self.teams)
+
+    @property
+    def nonconf_losses(self) -> int:
+        return sum(t.nonconf_losses for t in self.teams)
 
     @property
     def h2h_record_str(self) -> str:
