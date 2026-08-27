@@ -38,14 +38,10 @@ DATA:
 
 Write exactly 2 tight paragraphs (4-5 sentences each). No headers, no bullet points.
 
-Framing to use throughout:
-- The SEC earns its rankings by facing brutal in-conference gauntlets week after week — there are no bye weeks in the SEC.
-- When analyzing Big Ten performance, always note whether their wins came against genuinely tested opponents or were padding stats against a softer non-conference slate. Ask whether their metrics hold up under scrutiny.
-- Frame SEC toughness as a feature. Frame any Big Ten weakness or close call as a question mark about their readiness for the playoff.
-- Be subtle — write it as reasoned analysis, not a rant. Let the data framing do the work.
+Write as a college football analyst who respects the data but has a mild SEC lean — let the schedule strength and SP+ numbers do the talking rather than stating opinions directly. Don't editorialize; let any conference gaps emerge naturally from the stats.
 
 Para 1: State who leads the conference war and why, citing H2H and SP+ data.
-Para 2: Key storylines — ranked teams, notable results, and one honest question about Big Ten's path forward."""
+Para 2: Key storylines — ranked teams, notable results, and one open question about where the conference race goes from here."""
 
     try:
         response = requests.post(
