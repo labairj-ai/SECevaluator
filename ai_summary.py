@@ -11,7 +11,7 @@ def generate_summary(
     h2h_leader_str: str,
     week: int,
 ) -> Optional[str]:
-    """Call Mac Studio 70B for a tight conference narrative. Returns None on failure."""
+    """Call Mac Studio LLM for a tight conference narrative. Returns None on failure."""
 
     played = [g for g in cross_games if g.played]
     game_lines = []

@@ -21,7 +21,7 @@ SEASON_START = date(2026, 8, 28)
 SEASON_END = date(2027, 1, 21)
 
 MAC_STUDIO_URL = "http://100.73.128.40:8080/v1/chat/completions"
-LLM_MODEL = "mlx-community/Llama-3.3-70B-Instruct-4bit"
+LLM_MODEL = "mlx-community/Qwen3.6-35B-A3B-4bit"
 LLM_TIMEOUT = 120
 
 CFBD_API_KEY = os.environ.get("CFBD_API_KEY", "").strip()
