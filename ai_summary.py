@@ -53,12 +53,13 @@ Para 2: Key storylines — ranked teams, notable results, and one honest questio
             json={
                 "model": LLM_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 500,
+                "max_tokens": 8000,
                 "temperature": 0.72,
             },
             timeout=LLM_TIMEOUT,
         )
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
+        content = response.json()["choices"][0]["message"].get("content", "").strip()
+        return content or None
     except Exception:
         return None

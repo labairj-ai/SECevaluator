@@ -101,7 +101,10 @@ def main() -> None:
 
     log("Requesting AI summary from Mac Studio...")
     ai_text = generate_summary(sec_stats, big10_stats, cross_results, leader_str, week)
-    log("AI summary received." if ai_text else "AI summary unavailable.")
+    if not ai_text:
+        log("ERROR: AI summary unavailable. Aborting — email not sent.")
+        sys.exit(1)
+    log("AI summary received.")
 
     subject, text_body, html_body = build_email(
         sec_stats, big10_stats, cross_results, ai_text, leader_str, week, SEC_CONF_RESPONSE, year,
