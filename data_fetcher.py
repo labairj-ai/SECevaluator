@@ -1,4 +1,5 @@
 import requests
+import time
 from datetime import date
 from typing import Any
 
@@ -6,6 +7,8 @@ from config import CFBD_API_KEY, YEAR, SEC_CONF_PARAM, BIG10_CONF_PARAM, BIG10_C
 
 BASE_URL = "https://api.collegefootballdata.com"
 HTTP_TIMEOUT = 30
+HTTP_ATTEMPTS = 3
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def _headers() -> dict:
@@ -13,9 +16,23 @@ def _headers() -> dict:
 
 
 def _get(path: str, params: dict) -> list:
-    r = requests.get(f"{BASE_URL}{path}", headers=_headers(), params=params, timeout=HTTP_TIMEOUT)
-    r.raise_for_status()
-    return r.json()
+    for attempt in range(1, HTTP_ATTEMPTS + 1):
+        try:
+            r = requests.get(f"{BASE_URL}{path}", headers=_headers(), params=params, timeout=HTTP_TIMEOUT)
+            r.raise_for_status()
+        except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if isinstance(exc, requests.HTTPError) and status not in RETRYABLE_STATUS_CODES:
+                raise
+            if attempt == HTTP_ATTEMPTS:
+                print(f"CFBD {path}: failed after {attempt} attempts ({type(exc).__name__}, status={status})", flush=True)
+                raise
+            delay = 2 ** attempt
+            print(f"CFBD {path}: attempt {attempt}/{HTTP_ATTEMPTS} failed "
+                  f"({type(exc).__name__}, status={status}); retrying in {delay}s", flush=True)
+            time.sleep(delay)
+        else:
+            return r.json()
 
 
 def get_current_week() -> int:
