@@ -70,7 +70,7 @@ class CrossGameResult:
         return self.home_points is not None and self.away_points is not None
 
     def winner(self) -> Optional[str]:
-        if not self.played:
+        if not self.played or self.home_points == self.away_points:
             return None
         return self.home_team if self.home_points > self.away_points else self.away_team
 

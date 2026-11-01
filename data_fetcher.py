@@ -3,7 +3,7 @@ import time
 from datetime import date
 from typing import Any
 
-from config import CFBD_API_KEY, YEAR, SEC_CONF_PARAM, BIG10_CONF_PARAM, BIG10_CONF_RESPONSE, SEASON_START
+from config import CFBD_API_KEY, YEAR, SEC_CONF_PARAM, BIG10_CONF_PARAM, BIG10_CONF_RESPONSE, SEC_CONF_RESPONSE, SEASON_START
 
 BASE_URL = "https://api.collegefootballdata.com"
 HTTP_TIMEOUT = 30
@@ -49,46 +49,29 @@ def fetch_records(year: int, conference: str) -> list[dict]:
 
 def fetch_all_conference_games(year: int, conference: str) -> list[dict]:
     """All regular + postseason games involving any team in this conference."""
-    games: list[dict] = []
+    games = []
     for season_type in ("regular", "postseason"):
-        try:
-            games.extend(_get("/games", {"year": year, "seasonType": season_type, "conference": conference}))
-        except Exception:
-            pass
-    # deduplicate by id
-    seen: set = set()
-    unique = []
-    for g in games:
-        gid = g.get("id")
-        if gid not in seen:
-            seen.add(gid)
-            unique.append(g)
-    return unique
+        rows = _get("/games", {"year": year, "seasonType": season_type, "conference": conference})
+        if not isinstance(rows, list) or any(not isinstance(g, dict) or g.get("id") is None for g in rows):
+            raise ValueError("Invalid CFBD games response")
+        games.extend(rows)
+    unique = {}
+    for game in games:
+        gid = game["id"]
+        if gid in unique and unique[gid] != game:
+            raise ValueError("Conflicting CFBD game records")
+        unique[gid] = game
+    return list(unique.values())
+
+
+def cross_conference_games(games: list[dict]) -> list[dict]:
+    return [g for g in games if {g.get("homeConference"), g.get("awayConference")}
+            == {SEC_CONF_RESPONSE, BIG10_CONF_RESPONSE}]
 
 
 def fetch_cross_conference_games(year: int) -> list[dict]:
-    """Return all SEC vs Big Ten games (regular + postseason), played or upcoming."""
-    all_games: list[dict] = []
-    for season_type in ("regular", "postseason"):
-        try:
-            sec_games = _get("/games", {"year": year, "seasonType": season_type, "conference": SEC_CONF_PARAM})
-            cross = [
-                g for g in sec_games
-                if g.get("homeConference") == BIG10_CONF_RESPONSE
-                or g.get("awayConference") == BIG10_CONF_RESPONSE
-            ]
-            all_games.extend(cross)
-        except Exception:
-            pass
-    # Deduplicate
-    seen: set = set()
-    unique = []
-    for g in all_games:
-        gid = g.get("id")
-        if gid not in seen:
-            seen.add(gid)
-            unique.append(g)
-    return unique
+    """Require complete data; API failure must never mean no games played."""
+    return cross_conference_games(fetch_all_conference_games(year, SEC_CONF_PARAM))
 
 
 def _poll_sort_key(p: dict) -> int:
@@ -151,9 +134,12 @@ def fetch_sp_ratings(year: int) -> dict[str, dict]:
 def fetch_all_data(year: int, week: int) -> dict[str, Any]:
     sec_records    = fetch_records(year, SEC_CONF_PARAM)
     big10_records  = fetch_records(year, BIG10_CONF_PARAM)
-    cross_games    = fetch_cross_conference_games(year)
     sec_all_games  = fetch_all_conference_games(year, SEC_CONF_PARAM)
     big10_all_games = fetch_all_conference_games(year, BIG10_CONF_PARAM)
+    cross_games = cross_conference_games(sec_all_games)
+    other_cross = cross_conference_games(big10_all_games)
+    if {g["id"]: g for g in cross_games} != {g["id"]: g for g in other_cross}:
+        raise ValueError("SEC and Big Ten head-to-head data disagree")
     rankings       = fetch_rankings(year, week)
     sp_ratings     = fetch_sp_ratings(year)
     return {

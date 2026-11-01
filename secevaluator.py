@@ -100,7 +100,7 @@ def main() -> None:
         log(f"Game of the Week: {game_of_week.away_team} at {game_of_week.home_team} (Wk {game_of_week.week})")
 
     log("Requesting AI summary from Mac Studio...")
-    ai_text = generate_summary(sec_stats, big10_stats, cross_results, leader_str, week)
+    ai_text = generate_summary(sec_stats, big10_stats, cross_results, leader_str, week, year=args.year)
     if not ai_text:
         log("ERROR: AI summary unavailable. Aborting — email not sent.")
         sys.exit(1)

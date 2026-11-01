@@ -130,3 +130,18 @@ systemd/            — secevaluator.service + secevaluator.timer
 1. Update `YEAR`, `SEASON_START`, `SEASON_END` in `config.py`
 2. Push to GitHub and pull on optiplex
 3. The timer picks up automatically on the new season's first Sunday
+
+### Report data consistency
+
+Game API failures abort the digest rather than being presented as zero games.
+The head-to-head table is derived from the same season games used elsewhere in
+the report and must agree across the SEC and Big Ten queries. Incomplete or
+conflicting responses abort before email delivery. Summaries are generated from
+report facts, distinguish the head-to-head leader from the ratings leader, and
+use the requested season year. They no longer depend on unvalidated LLM prose.
+
+Run the offline regression suite without sending mail:
+
+```sh
+python -m unittest discover -s tests -v
+```
