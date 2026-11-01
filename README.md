@@ -145,3 +145,19 @@ Run the offline regression suite without sending mail:
 ```sh
 python -m unittest discover -s tests -v
 ```
+
+Accuracy safeguards also reconcile each team's overall and conference record
+against completed season games. Live scores are excluded from final results,
+top wins and upcoming-matchup selection. Invalid or inconsistent records abort
+before delivery. Ratings must cover every conference team for a conference-wide
+SP+ average; missing opponent ratings make the OOC comparison unavailable.
+OOC SOS is an unweighted mean of team-level averages, not a national SOS rank.
+Poll name and actual fallback week accompany ranking counts. Unavailable polls
+are distinct from zero ranked teams, and AP/Coaches results are not labeled CFP.
+Latest available season opponent ratings are not described as game-time or final
+season ratings. Both email formats use the same validated facts and explicitly
+handle zero ratings and missing comparisons.
+
+These checks establish internal consistency against CFBD evidence; they cannot
+guarantee that the upstream provider itself has no errors. Reports describe
+season-to-date data, not a historical week cutoff when replaying an old week.

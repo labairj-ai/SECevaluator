@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
+import math
 
 
 @dataclass
@@ -64,10 +65,11 @@ class CrossGameResult:
     away_points: Optional[int]
     neutral_site: bool = False
     game_date: str = ""
+    completed: bool = False
 
     @property
     def played(self) -> bool:
-        return self.home_points is not None and self.away_points is not None
+        return self.completed and self.home_points is not None and self.away_points is not None
 
     def winner(self) -> Optional[str]:
         if not self.played or self.home_points == self.away_points:
@@ -75,7 +77,7 @@ class CrossGameResult:
         return self.home_team if self.home_points > self.away_points else self.away_team
 
     def score_str(self) -> str:
-        if not self.played:
+        if self.winner() is None:
             return "TBD"
         loc = " (N)" if self.neutral_site else ""
         winner = self.winner()
@@ -100,6 +102,7 @@ class ConferenceStats:
     teams: list[TeamStats] = field(default_factory=list)
     h2h_wins: int = 0
     h2h_losses: int = 0
+    poll_label: Optional[str] = None
     d_avg_sp: Optional[float] = None
     d_avg_sos: Optional[float] = None
 
@@ -110,12 +113,12 @@ class ConferenceStats:
     @property
     def avg_sp_rating(self) -> Optional[float]:
         rated = [t.sp_rating for t in self.teams if t.sp_rating is not None]
-        return round(sum(rated) / len(rated), 2) if rated else None
+        return round(sum(rated) / len(rated), 2) if rated and len(rated) == len(self.teams) else None
 
     @property
     def avg_sos(self) -> Optional[float]:
         rated = [t.sos_ooc for t in self.teams if t.sos_ooc is not None]
-        return round(sum(rated) / len(rated), 2) if rated else None
+        return round(sum(rated) / len(rated), 2) if rated and len(rated) == len(self.teams) else None
 
     @property
     def total_wins(self) -> int:
@@ -166,11 +169,16 @@ def _compute_ooc_sos(
             continue
         if opponent in conf_team_names:
             continue  # skip intra-conference opponents
-        if g.get("homePoints") is None:
+        if g.get("completed") is not True or g.get("homePoints") is None or g.get("awayPoints") is None:
             continue  # game not yet played
         sp = sp_ratings.get(opponent, {})
         if sp and sp.get("rating") is not None:
-            opponent_sp.append(sp["rating"])
+            value = sp["rating"]
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise ValueError("Invalid opponent SP+ rating")
+            opponent_sp.append(value)
+        else:
+            return None  # incomplete opponent coverage is not a complete schedule rating
     return round(sum(opponent_sp) / len(opponent_sp), 2) if opponent_sp else None
 
 
@@ -181,15 +189,41 @@ def build_team_stats(
     rankings: dict,
     conference_display: str,
 ) -> list[TeamStats]:
-    team_names = {r.get("team", "") for r in records}
+    if not records or any(not r.get("team") for r in records):
+        raise ValueError("Missing conference team records")
+    team_names = {r["team"] for r in records}
+    if len(team_names) != len(records):
+        raise ValueError("Duplicate team records")
 
     teams = []
     for row in records:
         team_name = row.get("team", "")
         total = row.get("total", {})
-        conf  = row.get("conferenceGames", {})
+        conf = row.get("conferenceGames", {})
+        for key in ("wins", "losses"):
+            if any(type(r.get(key)) is not int or r[key] < 0 for r in (total, conf)) or conf[key] > total[key]:
+                raise ValueError("Invalid team record")
         sp    = sp_ratings.get(team_name, {})
+        played = [g for g in all_conf_games if g.get("completed") is True
+                  and team_name in (g.get("homeTeam"), g.get("awayTeam"))]
+        wins = losses = conf_wins = conf_losses = 0
+        for game in played:
+            hp, ap = game.get("homePoints"), game.get("awayPoints")
+            if any(type(v) is not int or v < 0 for v in (hp, ap)) or hp == ap:
+                raise ValueError("Invalid completed game scores")
+            home = game["homeTeam"] == team_name
+            won = hp > ap if home else ap > hp
+            opponent = game["awayTeam"] if home else game["homeTeam"]
+            wins += won
+            losses += not won
+            conf_wins += won and opponent in team_names
+            conf_losses += not won and opponent in team_names
+        if (wins, losses, conf_wins, conf_losses) != (total["wins"], total["losses"], conf["wins"], conf["losses"]):
+            raise ValueError("Team records disagree with completed season games")
 
+        for value in (sp.get("rating"),):
+            if value is not None and (type(value) not in (int, float) or not math.isfinite(value)):
+                raise ValueError("Invalid SP+ rating")
         sos = _compute_ooc_sos(team_name, team_names, all_conf_games, sp_ratings)
 
         ts = TeamStats(
@@ -213,7 +247,14 @@ def build_cross_game_results(raw_games: list[dict]) -> list[CrossGameResult]:
     """Build CrossGameResult list from raw API game dicts (camelCase fields)."""
     results = []
     for g in raw_games:
+        if {g.get("homeConference"), g.get("awayConference")} != {"SEC", "Big Ten"}:
+            raise ValueError("Not an SEC–Big Ten game")
+        if g.get("completed") is True:
+            hp, ap = g.get("homePoints"), g.get("awayPoints")
+            if any(type(v) is not int or v < 0 for v in (hp, ap)) or hp == ap:
+                raise ValueError("Invalid completed game scores")
         results.append(CrossGameResult(
+            completed=g.get("completed") is True,
             week=g.get("week", 0),
             home_team=g.get("homeTeam", ""),
             home_conference=g.get("homeConference", ""),
@@ -290,7 +331,7 @@ def compute_top_wins(
     conference_display: str,
     n: int = 5,
 ) -> list[TopWin]:
-    """Top N wins by conference teams ranked by opponent SP+ at time of game."""
+    """Top N wins by conference teams ranked by latest available opponent SP+."""
     wins: list[TopWin] = []
     seen: set = set()
     for g in all_conf_games:
@@ -303,7 +344,7 @@ def compute_top_wins(
         away  = g.get("awayTeam", "")
         hp    = g.get("homePoints")
         ap    = g.get("awayPoints")
-        if hp is None or ap is None or hp == ap:
+        if g.get("completed") is not True or hp is None or ap is None or hp == ap:
             continue
 
         if home in conf_team_names and hp > ap:
@@ -359,7 +400,7 @@ def compute_game_of_week(
     sp_ratings: dict,
 ) -> Optional[GameOfWeek]:
     """Return the highest-quality upcoming SEC vs Big Ten matchup by combined SP+."""
-    upcoming = [g for g in cross_games if not g.played]
+    upcoming = [g for g in cross_games if not g.completed and g.home_points is None and g.away_points is None]
     if not upcoming:
         return None
 

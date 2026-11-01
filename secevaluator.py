@@ -78,15 +78,19 @@ def main() -> None:
     sec_stats   = build_conference_stats(SEC_CONF_RESPONSE,   SEC_DISPLAY,   sec_teams,   cross_results, SEC_CONF_RESPONSE)
     big10_stats = build_conference_stats(BIG10_CONF_RESPONSE, BIG10_DISPLAY, big10_teams, cross_results, SEC_CONF_RESPONSE)
 
+    poll = data["rankings"]
+    poll_label = f"{poll.poll}, week {poll.week}" if poll.poll else None
+    sec_stats.poll_label = big10_stats.poll_label = poll_label
+
     # Load prior week snapshots for week-over-week deltas
     prior_sec   = load_prior_snapshot(year, week, SEC_CONF_RESPONSE)
     prior_big10 = load_prior_snapshot(year, week, BIG10_CONF_RESPONSE)
-    if prior_sec and sec_stats.avg_sp_rating is not None:
-        sec_stats.d_avg_sp  = (sec_stats.avg_sp_rating  or 0) - (prior_sec["avg_sp_rating"]  or 0) if prior_sec["avg_sp_rating"]  else None
-        sec_stats.d_avg_sos = (sec_stats.avg_sos         or 0) - (prior_sec["avg_sos"]         or 0) if prior_sec["avg_sos"]         else None
-    if prior_big10 and big10_stats.avg_sp_rating is not None:
-        big10_stats.d_avg_sp  = (big10_stats.avg_sp_rating  or 0) - (prior_big10["avg_sp_rating"]  or 0) if prior_big10["avg_sp_rating"]  else None
-        big10_stats.d_avg_sos = (big10_stats.avg_sos          or 0) - (prior_big10["avg_sos"]          or 0) if prior_big10["avg_sos"]          else None
+    for stats, prior in ((sec_stats, prior_sec), (big10_stats, prior_big10)):
+        if prior:
+            for field in ("avg_sp_rating", "avg_sos"):
+                current, previous = getattr(stats, field), prior[field]
+                delta = current - previous if current is not None and previous is not None else None
+                setattr(stats, "d_avg_sp" if field == "avg_sp_rating" else "d_avg_sos", delta)
 
     leader_str = h2h_leader(sec_stats, big10_stats)
     log(f"H2H: {leader_str}")
@@ -99,12 +103,12 @@ def main() -> None:
     if game_of_week:
         log(f"Game of the Week: {game_of_week.away_team} at {game_of_week.home_team} (Wk {game_of_week.week})")
 
-    log("Requesting AI summary from Mac Studio...")
+    log("Building validated data summary...")
     ai_text = generate_summary(sec_stats, big10_stats, cross_results, leader_str, week, year=args.year)
     if not ai_text:
         log("ERROR: AI summary unavailable. Aborting — email not sent.")
         sys.exit(1)
-    log("AI summary received.")
+    log("Data summary validated.")
 
     subject, text_body, html_body = build_email(
         sec_stats, big10_stats, cross_results, ai_text, leader_str, week, SEC_CONF_RESPONSE, year,

@@ -7,7 +7,7 @@ from ai_summary import generate_summary
 
 
 def game(i, sec_wins=True):
-    return dict(id=i, week=i, homeTeam='SEC team', awayTeam='Big Ten team',
+    return dict(id=i, week=i, completed=True, homeTeam='SEC team', awayTeam='Big Ten team',
                 homeConference='SEC', awayConference='Big Ten', homePoints=24 if sec_wins else 10,
                 awayPoints=10 if sec_wins else 24, startDate='2026-09-01')
 
@@ -58,7 +58,8 @@ class ReportTests(unittest.TestCase):
 
     def test_tied_scores_do_not_invent_a_winner(self):
         g = dict(game(1), homePoints=0, awayPoints=0)
-        self.assertIsNone(build_cross_game_results([g])[0].winner())
+        with self.assertRaises(ValueError):
+            build_cross_game_results([g])
 
     def test_conference_disagreement_aborts(self):
         with patch.object(d, 'fetch_records', return_value=[]), patch.object(d, 'fetch_all_conference_games', side_effect=[[game(1)], []]):

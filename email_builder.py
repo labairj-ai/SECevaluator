@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
+from html import escape
 from typing import Optional
 
 from metrics import TeamStats, ConferenceStats, CrossGameResult, TopWin, GameOfWeek
@@ -88,7 +89,7 @@ def _standings_table_html(conf: ConferenceStats) -> str:
   <caption style='text-align:left;font-size:15px;font-weight:bold;color:{color};padding-bottom:5px;'>
     {conf.display} Standings
     <span style='font-size:11px;font-weight:normal;color:#888;margin-left:8px;'>
-      <span style='background:#fff9c4;padding:1px 5px;border:1px solid #ddd;'>&#9632;</span> = CFP top 5
+      <span style='background:#fff9c4;padding:1px 5px;border:1px solid #ddd;'>&#9632;</span> = Selected poll top 5
     </span>
   </caption>
   <colgroup>
@@ -99,7 +100,7 @@ def _standings_table_html(conf: ConferenceStats) -> str:
     <col style='width:56px;'>
   </colgroup>
   <thead><tr>
-    {_th("CFP", title="College Football Playoff ranking. — = unranked.")}
+    {_th("Poll", title="Selected poll ranking. — = unranked or unavailable.")}
     {_th("Team")}
     {_th("Record (conf / ext)", title="Overall record. Sub-line: conference record / external (non-conference) record.")}
     {_th("SP+", title="ESPN predictive rating vs avg opponent. 0 = average FBS; higher = better.")}
@@ -193,28 +194,28 @@ def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
         ),
         _row(
             "Avg SP+ ↑ better",
-            f"{sec_sp:+.1f}" if sec_sp is not None else "N/A",
-            f"{b10_sp:+.1f}" if b10_sp is not None else "N/A",
-            sec_better=(sec_sp > b10_sp) if (sec_sp and b10_sp) else None,
+            f"{sec_sp:+.2f}" if sec_sp is not None else "N/A",
+            f"{b10_sp:+.2f}" if b10_sp is not None else "N/A",
+            sec_better=(sec_sp > b10_sp) if (sec_sp is not None and b10_sp is not None) else None,
             sec_delta=_delta_str(sec.d_avg_sp, higher_is_better=True),
             b10_delta=_delta_str(big10.d_avg_sp, higher_is_better=True),
-            tip="SP+ is ESPN's predictive team quality rating, adjusted for opponent strength. National average = 0. Higher = better. Shows average across all conference teams.",
+            tip="SP+ is ESPN's predictive team quality rating, adjusted for opponent strength. National average = 0. Higher = better. Available only with complete team rating coverage.",
         ),
         _row(
-            "Avg SOS ↑ harder",
+            "Avg OOC SOS ↑ harder",
             f"{sec_sos:.2f}" if sec_sos is not None else "N/A",
             f"{b10_sos:.2f}" if b10_sos is not None else "N/A",
-            sec_better=(sec_sos > b10_sos) if (sec_sos and b10_sos) else None,
+            sec_better=(sec_sos > b10_sos) if (sec_sos is not None and b10_sos is not None) else None,
             sec_delta=_delta_str(sec.d_avg_sos, higher_is_better=True),
             b10_delta=_delta_str(big10.d_avg_sos, higher_is_better=True),
-            tip="Strength of Schedule — how difficult each conference's average opponent slate has been. Higher = harder schedule. Arrows show change vs last week.",
+            tip="Mean team-level SP+ of completed nonconference opponents; unavailable if opponent ratings are missing. Higher = harder schedule. Arrows show change vs last week.",
         ),
         _row(
-            "CFP Top-25 Teams",
-            str(sec.ranked_teams),
-            str(big10.ranked_teams),
-            sec_better=sec.ranked_teams > big10.ranked_teams if sec.ranked_teams != big10.ranked_teams else None,
-            tip="Number of teams ranked in the College Football Playoff top 25.",
+            "Poll Top-25 Teams",
+            str(sec.ranked_teams) if sec.poll_label else "N/A",
+            str(big10.ranked_teams) if big10.poll_label else "N/A",
+            sec_better=sec.ranked_teams > big10.ranked_teams if sec.poll_label and sec.poll_label == big10.poll_label and sec.ranked_teams != big10.ranked_teams else None,
+            tip="Number ranked in the selected poll; N/A means unavailable.",
         ),
     ]
 
@@ -292,7 +293,7 @@ def _top_wins_html(sec_wins: list[TopWin], big10_wins: list[TopWin]) -> str:
     {_th("Opponent")}
     {_th("Score")}
     {_th("Margin")}
-    {_th("Opp SP+", title="SP+ rating of the opponent at end of season — higher means more impressive win.")}
+    {_th("Opp SP+", title="SP+ rating of the opponent from the latest available ratings — higher means more impressive win.")}
   </tr></thead>
   <tbody>{_wins_rows(wins, color)}</tbody>
 </table>"""
@@ -311,7 +312,7 @@ def _metric_legend_html() -> str:
   <span style='margin-left:12px;'><strong>External</strong> — wins/losses vs non-conference opponents only; same-conference games excluded.</span>
   <span style='margin-left:12px;'><strong>SP+</strong> — ESPN's predictive rating adjusted for opponent quality. 0 = average FBS team; +10 means ~10 pts/game better than average.</span>
   <span style='margin-left:12px;'><strong>OOC SOS</strong> — avg SP+ of non-conference opponents faced. Higher = harder external schedule. Arrows (▲▼) show week-over-week change.</span>
-  <span style='margin-left:12px;'><strong>CFP Rank</strong> — College Football Playoff committee ranking. Top 12 earn automatic playoff bids.</span>
+  <span style='margin-left:12px;'><strong>Poll Rank</strong> — Selected available poll ranking. Poll rankings alone do not establish playoff qualification.</span>
 </div>
 """
 
@@ -333,7 +334,7 @@ def build_html(
 
     if ai_text:
         paragraphs = "\n".join(
-            f"<p style='margin:10px 0;'>{p.strip()}</p>"
+            f"<p style='margin:10px 0;'>{escape(p.strip())}</p>"
             for p in ai_text.split("\n\n") if p.strip()
         )
         ai_section = f"""
@@ -341,13 +342,13 @@ def build_html(
             margin-bottom:24px;border-radius:4px;font-family:Arial,sans-serif;
             font-size:14px;line-height:1.6;'>
   <div style='font-weight:bold;font-size:14px;margin-bottom:8px;color:#334;'>
-    AI Analysis — Conference War Breakdown
+    Data Summary — Conference Comparison
   </div>
   {paragraphs}
 </div>
 """
     else:
-        ai_section = "<p style='color:#888;font-style:italic;font-family:Arial,sans-serif;'>AI summary unavailable (Mac Studio offline).</p>"
+        ai_section = "<p style='color:#888;font-style:italic;font-family:Arial,sans-serif;'>Data summary unavailable.</p>"
 
     return f"""<!DOCTYPE html>
 <html>
@@ -367,6 +368,7 @@ def build_html(
   </div>
 
   <div style='padding:16px 18px;'>
+    <p>Rankings: {escape(sec.poll_label or "Unavailable")}. Ratings use the latest available season data; OOC SOS is the mean of team-level rated nonconference schedules.</p>
     {_game_of_week_html(game_of_week) if game_of_week else ""}
     {ai_section}
     {_metric_legend_html()}
@@ -404,8 +406,9 @@ def build_text(
         "",
     ]
     if ai_text:
-        lines += ["AI ANALYSIS", "-" * 30, ai_text, ""]
+        lines += ["DATA SUMMARY", "-" * 30, ai_text, ""]
 
+    lines.append(f"Rankings: {sec.poll_label or 'Unavailable'}")
     lines += ["CONFERENCE COMPARISON (SP+ = quality rating, 0=avg; SOS = schedule difficulty, higher=harder)", "-" * 30]
     sp_note = "(▲▼ = change vs last week)"
     lines.append(f"{'Metric':<26} {'SEC':>10} {'Big Ten':>10}  {sp_note}")
@@ -418,15 +421,19 @@ def build_text(
     lines.append(f"{'H2H Record':<26} {sec.h2h_wins}-{sec.h2h_losses:>9} {big10.h2h_wins}-{big10.h2h_losses:>9}")
     lines.append(f"{'Overall Record':<26} {sec.total_wins}-{sec.total_losses:>9} {big10.total_wins}-{big10.total_losses:>9}")
     lines.append(f"{'External Record (OOC)':<26} {sec.nonconf_wins}-{sec.nonconf_losses:>9} {big10.nonconf_wins}-{big10.nonconf_losses:>9}")
-    if sec.avg_sp_rating and big10.avg_sp_rating:
+    if sec.avg_sp_rating is not None and big10.avg_sp_rating is not None:
         d1 = _fmt_delta(sec.d_avg_sp)
         d2 = _fmt_delta(big10.d_avg_sp)
-        lines.append(f"{'Avg SP+':<26} {sec.avg_sp_rating:>+10.1f} {big10.avg_sp_rating:>+10.1f}  {d1} / {d2}")
-    if sec.avg_sos and big10.avg_sos:
+        lines.append(f"{'Avg SP+':<26} {sec.avg_sp_rating:>+10.2f} {big10.avg_sp_rating:>+10.2f}  {d1} / {d2}")
+    if sec.avg_sos is not None and big10.avg_sos is not None:
         d1 = _fmt_delta(sec.d_avg_sos)
         d2 = _fmt_delta(big10.d_avg_sos)
         lines.append(f"{'Avg SOS':<26} {sec.avg_sos:>10.2f} {big10.avg_sos:>10.2f}  {d1} / {d2}")
-    lines.append(f"{'CFP Top-25 Teams':<26} {sec.ranked_teams:>10} {big10.ranked_teams:>10}")
+    if sec.avg_sp_rating is None or big10.avg_sp_rating is None:
+        lines.append("Avg SP+: comparison unavailable (incomplete rating coverage)")
+    if sec.avg_sos is None or big10.avg_sos is None:
+        lines.append("Avg OOC SOS: comparison unavailable (incomplete opponent rating coverage)")
+    lines.append(f"{'Poll Top-25 Teams':<26} {str(sec.ranked_teams) if sec.poll_label else 'N/A':>10} {str(big10.ranked_teams) if big10.poll_label else 'N/A':>10}")
     lines.append("")
 
     if game_of_week:
@@ -454,7 +461,7 @@ def build_text(
 
     for conf in (sec, big10):
         lines += [f"{conf.display} STANDINGS", "-" * 30,
-                  f"  {'Team':<25} {'Overall':>8} {'Conf':>6} {'External':>9} {'SP+':>6} {'OOC SOS':>8} {'CFP':>5}"]
+                  f"  {'Team':<25} {'Overall':>8} {'Conf':>6} {'External':>9} {'SP+':>6} {'OOC SOS':>8} {'Poll':>5}"]
         for t in conf.teams:
             lines.append(
                 f"  {t.team:<25} {t.record_str:>8} {t.conf_record_str:>6}"

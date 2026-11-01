@@ -85,41 +85,31 @@ def _poll_sort_key(p: dict) -> int:
     return 9  # FCS, D2, D3 -- skip
 
 
+class Rankings(dict):
+    """Ranks plus the actual poll/week, including an explicit unavailable state."""
+    def __init__(self, values=None, *, poll=None, week=None):
+        super().__init__(values or {})
+        self.poll = poll
+        self.week = week
+
+
 def fetch_rankings(year: int, week: int) -> dict[str, int]:
-    """Return dict of team -> rank (CFP preferred, AP Top 25 fallback).
-
-    If the requested week has no rankings yet (polls publish after games),
-    walks back up to 4 weeks to find the most recent available rankings.
-    """
-    season_type = "postseason" if date.today() > date(year, 12, 1) and year == YEAR else "regular"
-
-    data: list = []
     for w in range(week, max(0, week - 4), -1):
-        try:
-            data = _get("/rankings", {"year": year, "week": w, "seasonType": season_type})
-        except Exception:
-            continue
-        if data:
-            break
-
-    if not data:
-        return {}
-
-    rankings: dict[str, int] = {}
-    week_data = data[0]
-
-    for poll in sorted(week_data.get("polls", []), key=_poll_sort_key):
-        if _poll_sort_key(poll) >= 9:
-            break  # skip FCS/D2/D3 polls entirely
-        for entry in poll.get("ranks", []):
-            school = entry.get("school", "")
-            rank   = entry.get("rank")
-            if school and rank and school not in rankings:
-                rankings[school] = rank
-        # One authoritative FBS poll is enough
-        if "Playoff" in poll.get("poll", "") or "AP" in poll.get("poll", ""):
-            break
-    return rankings
+        data = _get("/rankings", {"year": year, "week": w, "seasonType": "regular"})
+        if not isinstance(data, list):
+            raise ValueError("Invalid rankings response")
+        for entry in data:
+            for poll in sorted(entry.get("polls", []), key=_poll_sort_key):
+                if _poll_sort_key(poll) >= 9 or not poll.get("ranks"):
+                    continue
+                ranks = {}
+                for row in poll["ranks"]:
+                    school, rank = row.get("school"), row.get("rank")
+                    if not school or type(rank) is not int or not 1 <= rank <= 25 or school in ranks:
+                        raise ValueError("Invalid poll rank")
+                    ranks[school] = rank
+                return Rankings(ranks, poll=poll["poll"], week=w)
+    return Rankings()
 
 
 def fetch_sp_ratings(year: int) -> dict[str, dict]:
