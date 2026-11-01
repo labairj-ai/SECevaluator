@@ -8,10 +8,10 @@ Each email includes:
 
 - **Game of the Week** — highest combined-SP+ upcoming SEC vs Big Ten matchup by combined SP+ rating
 - **Data Summary** — 2 paragraphs generated from reconciled results, ratings and identified poll evidence
-- **Conference Comparison** — head-to-head record, overall, external (non-conference), avg SP+, avg OOC SOS, selected-poll ranked teams; with arrows against the prior comparable saved report
+- **Conference Comparison** — head-to-head record, overall, external (non-conference), avg SP+, rated-only OOC opponent SP+ with coverage, selected-poll ranked teams; with arrows against the prior comparable saved report
 - **Cross-Conference Results** — every SEC vs Big Ten game played, with score and margin
 - **Best Wins** — top 5 wins per conference ranked by opponent SP+ rating
-- **Standings** — all SEC and Big Ten teams with overall / conference / external records, SP+, OOC SOS, selected-poll rank
+- **Standings** — all SEC and Big Ten teams with overall / conference / external records, SP+, rated-only OOC opponent SP+ with coverage, selected-poll rank
 
 ## Data Sources
 
@@ -23,7 +23,7 @@ Each email includes:
 ## Metric Glossary
 
 - **SP+** — ESPN's predictive team quality rating, adjusted for opponent strength. 0 = average FBS team; +10 means roughly 10 points per game better than average.
-- **OOC SOS** — Out-of-Conference Strength of Schedule. Average SP+ of non-conference opponents faced. Higher = harder external slate.
+- **OOC opponent SP+** — game-weighted average SP+ of rated nonconference opponents, with rated/total completed-game coverage. Unrated opponents (often FCS) are excluded, not assigned zero. This is not complete schedule strength.
 - **External Record** — wins/losses against non-conference opponents only; same-conference games excluded.
 - **Poll Rank** — rank in the actual named poll and week (CFP preferred when available, then AP, then Coaches). Rankings do not by themselves establish playoff qualification.
 
@@ -150,8 +150,8 @@ Accuracy safeguards also reconcile each team's overall and conference record
 against completed season games. Live scores are excluded from final results,
 top wins and upcoming-matchup selection. Invalid or inconsistent records abort
 before delivery. Ratings must cover every conference team for a conference-wide
-SP+ average; missing opponent ratings make the OOC comparison unavailable.
-OOC SOS is an unweighted mean of team-level averages, not a national SOS rank.
+SP+ average; missing opponent ratings are excluded from the OOC average, with explicit rated/total game counts.
+Conference OOC opponent SP+ is game-weighted across rated opponents, not a national SOS rank.
 Poll name and actual fallback week accompany ranking counts. Unavailable polls
 are distinct from zero ranked teams, and AP/Coaches results are not labeled CFP.
 Latest available season opponent ratings are not described as game-time or final
@@ -175,7 +175,7 @@ season-to-date data, not a historical week cutoff when replaying an old week.
   validated games; caller-supplied stale commentary cannot override the facts.
 - New `report_snapshots` rows are saved for both conferences in one transaction.
   The legacy `weekly_snapshots` table is preserved without alteration and is not
-  used for comparisons against the stricter v2 metric definitions. Regular and
+  used for comparisons against newer metric definitions. Regular and
   postseason week numbers are separate keys. Missing ranked counts are NULL.
 - `--dry-run` can write diagnostic logs but never sends mail, initializes the
   database or saves snapshots. Test sends require explicit test recipients.
@@ -195,3 +195,19 @@ season-to-date as supplied by CFBD, not a reconstructed historical cutoff.
 Gmail delivery and SQLite cannot form a single atomic transaction: an ambiguous
 network failure or a snapshot failure after delivery needs operator review
 before retrying, to avoid duplicate email. No automatic mail retry is added.
+
+
+### Rated-opponent coverage (metric version 3)
+
+FCS opponents generally have no rating in the returned SP+ dataset. Missing
+ratings no longer suppress all OOC results. Each team and conference shows the
+average over rated opponent-games and its rated/total completed-game counts.
+The conference average weights each rated opponent-game equally, using raw
+rating sums rather than rounded team averages. Unrated opponents are excluded,
+never set to zero. A team with no rated opponents shows N/A and its coverage.
+No overall schedule winner is inferred or highlighted from this partial metric.
+
+Snapshots store coverage counts and metric version 3. Prior version 2 rows and
+legacy tables are preserved, but are not used for deltas against the new metric.
+The next normal run adds coverage columns if an older report table exists;
+`--dry-run` and `--test` continue to make no history/schema changes.

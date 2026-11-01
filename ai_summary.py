@@ -16,13 +16,16 @@ def generate_summary(sec_stats, big10_stats, cross_games, h2h_leader_str, week, 
     sentences.append(f"Overall records are SEC {sec_stats.total_wins}-{sec_stats.total_losses} "
                      f"and Big Ten {big10_stats.total_wins}-{big10_stats.total_losses}; "
                      "these include conference games and are separate from head-to-head results.")
-    for label, attr in (("SP+", "avg_sp_rating"), ("nonconference opponent SP+", "avg_sos")):
+    for label, attr in (("SP+", "avg_sp_rating"),):
         a, b = getattr(sec_stats, attr), getattr(big10_stats, attr)
         if a is None or b is None:
             sentences.append(f"The {label} comparison is unavailable because rating data is incomplete.")
         else:
             lead = "Neither conference leads" if a == b else ("SEC leads" if a > b else "Big Ten leads")
             sentences.append(f"{lead} on average {label}: SEC {a:+.2f}, Big Ten {b:+.2f}.")
+    sentences.append("Nonconference opponent SP+ (rated opponents only; game-weighted): "
+                     f"SEC {sec_stats.sos_str}; Big Ten {big10_stats.sos_str}.")
+    sentences.append("Unrated opponents are excluded; this is not a complete schedule-strength comparison.")
     results = "; ".join(g.score_str() for g in played[-8:])
     second = f"Completed head-to-head results (latest eight): {results}." if results else "No completed SEC–Big Ten games are present in the verified season data."
     if sec_stats.poll_label and sec_stats.poll_label == big10_stats.poll_label:

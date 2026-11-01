@@ -115,7 +115,7 @@ class AccuracyTests(unittest.TestCase):
         sec,big,cross=self.stats([])
         _,plain,html=build_email(sec,big,cross,generate_summary(sec,big,cross,'',10),'',10,'SEC',2026)
         self.assertIn('Avg SP+: comparison unavailable',plain)
-        self.assertIn('Avg OOC SOS: comparison unavailable',plain)
+        self.assertIn('OOC opponent SP+*: SEC N/A (0/0 games rated)',plain)
         self.assertIn('N/A',html)
 
 if __name__=='__main__': unittest.main()

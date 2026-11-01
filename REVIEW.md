@@ -67,3 +67,20 @@ Changes are source-only. Deploying the source, updating installed units,
 reloading systemd, or sending a corrected digest are separate operational
 steps. Existing databases, credentials, live services and timers were not changed
 by this review. Native validation used disposable unit files only.
+
+
+## Rated-only opponent update (metric version 3)
+
+The initial completeness rule suppressed OOC comparisons whenever an opponent
+had no SP+ rating. Current evidence shows the missing opponents are FCS teams:
+SEC has 30/40 rated nonconference opponent-games; Big Ten has 42/54. Version 3
+instead shows the game-weighted rated-opponent average and explicit coverage
+in the narrative, comparison table, standings and plain text. Unrated opponents
+are excluded, never treated as zero. No schedule winner is declared or colored
+from this partial measure. The captured data yields SEC −2.94 and Big Ten −3.44.
+
+Coverage is stored with new snapshots. Existing rows and legacy tables remain
+preserved; old-definition snapshots are not used for version 3 deltas. Tests
+cover weighting, zero ratings, missing/all-missing ratings, unfinished and
+conference games, rendering, v2 schema migration and preservation, and v3
+coverage persistence. All 69 tests pass on macOS and isolated Linux/Python 3.12.

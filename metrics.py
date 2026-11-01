@@ -14,7 +14,10 @@ class TeamStats:
     conf_losses: int = 0
     sp_rating: Optional[float] = None
     sp_rank: Optional[int] = None
-    sos_ooc: Optional[float] = None    # avg SP+ of non-conference opponents
+    sos_ooc: Optional[float] = None    # avg SP+ of rated non-conference opponents
+    sos_rated_games: int = 0
+    sos_total_games: int = 0
+    sos_rating_total: float = 0.0
     cfp_rank: Optional[int] = None
 
     @property
@@ -52,7 +55,8 @@ class TeamStats:
 
     @property
     def sos_str(self) -> str:
-        return f"{self.sos_ooc:+.1f}" if self.sos_ooc is not None else "N/A"
+        value = f"{self.sos_ooc:+.2f}" if self.sos_ooc is not None else "N/A"
+        return f"{value} ({self.sos_rated_games}/{self.sos_total_games})"
 
 
 @dataclass
@@ -124,8 +128,25 @@ class ConferenceStats:
 
     @property
     def avg_sos(self) -> Optional[float]:
-        rated = [t.sos_ooc for t in self.teams if t.sos_ooc is not None]
-        return round(sum(rated) / len(rated), 2) if rated and len(rated) == len(self.teams) else None
+        count = self.sos_rated_games
+        return round(math.fsum(t.sos_rating_total for t in self.teams) / count, 2) if count else None
+
+    @property
+    def sos_rated_games(self) -> int:
+        return sum(t.sos_rated_games for t in self.teams)
+
+    @property
+    def sos_total_games(self) -> int:
+        return sum(t.sos_total_games for t in self.teams)
+
+    @property
+    def sos_coverage_str(self) -> str:
+        return f"{self.sos_rated_games}/{self.sos_total_games} games rated"
+
+    @property
+    def sos_str(self) -> str:
+        value = f"{self.avg_sos:+.2f}" if self.avg_sos is not None else "N/A"
+        return f"{value} ({self.sos_coverage_str})"
 
     @property
     def total_wins(self) -> int:
@@ -162,9 +183,10 @@ def _compute_ooc_sos(
     conf_team_names: set[str],
     all_conf_games: list[dict],
     sp_ratings: dict,
-) -> Optional[float]:
-    """Average SP+ rating of non-conference opponents faced by this team."""
+) -> tuple[Optional[float], int, int, float]:
+    """Rated-only opponent average, rated/total game counts, and unrounded sum."""
     opponent_sp: list[float] = []
+    total_games = 0
     for g in all_conf_games:
         home = g.get("homeTeam", "")
         away = g.get("awayTeam", "")
@@ -178,15 +200,16 @@ def _compute_ooc_sos(
             continue  # skip intra-conference opponents
         if g.get("completed") is not True or g.get("homePoints") is None or g.get("awayPoints") is None:
             continue  # game not yet played
+        total_games += 1
         sp = sp_ratings.get(opponent, {})
         if sp and sp.get("rating") is not None:
             value = sp["rating"]
             if type(value) not in (int, float) or not math.isfinite(value):
                 raise ValueError("Invalid opponent SP+ rating")
             opponent_sp.append(value)
-        else:
-            return None  # incomplete opponent coverage is not a complete schedule rating
-    return round(sum(opponent_sp) / len(opponent_sp), 2) if opponent_sp else None
+    count = len(opponent_sp)
+    rating_total = math.fsum(opponent_sp)
+    return (round(rating_total / count, 2) if count else None, count, total_games, rating_total)
 
 
 def build_team_stats(
@@ -235,7 +258,7 @@ def build_team_stats(
         for value in (sp.get("rating"),):
             if value is not None and (type(value) not in (int, float) or not math.isfinite(value)):
                 raise ValueError("Invalid SP+ rating")
-        sos = _compute_ooc_sos(team_name, team_names, all_conf_games, sp_ratings)
+        sos, rated_games, total_games, rating_total = _compute_ooc_sos(team_name, team_names, all_conf_games, sp_ratings)
 
         ts = TeamStats(
             team=team_name,
@@ -247,6 +270,9 @@ def build_team_stats(
             sp_rating=sp.get("rating"),
             sp_rank=sp.get("ranking"),
             sos_ooc=sos,
+            sos_rated_games=rated_games,
+            sos_total_games=total_games,
+            sos_rating_total=rating_total,
             cfp_rank=rankings.get(team_name),
         )
         teams.append(ts)
