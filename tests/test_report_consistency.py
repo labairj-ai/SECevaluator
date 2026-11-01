@@ -7,9 +7,9 @@ from ai_summary import generate_summary
 
 
 def game(i, sec_wins=True):
-    return dict(id=i, week=i, completed=True, homeTeam='SEC team', awayTeam='Big Ten team',
+    return dict(id=i, week=i, season=2026, seasonType='regular', completed=True, homeTeam='SEC team', awayTeam='Big Ten team',
                 homeConference='SEC', awayConference='Big Ten', homePoints=24 if sec_wins else 10,
-                awayPoints=10 if sec_wins else 24, startDate='2026-09-01')
+                awayPoints=10 if sec_wins else 24, startDate='2026-09-01T12:00:00Z')
 
 
 class ReportTests(unittest.TestCase):
@@ -26,8 +26,8 @@ class ReportTests(unittest.TestCase):
 
     def test_deduplicate_and_filter(self):
         g = game(1)
-        other = dict(game(2), homeConference='ACC')
-        with patch.object(d, '_get', side_effect=[[g, other], [g]]):
+        other = dict(game(2), awayConference='ACC')
+        with patch.object(d, '_get', side_effect=[[g, other, g], []]):
             self.assertEqual(d.fetch_cross_conference_games(2026), [g])
 
     def test_malformed_response_aborts(self):

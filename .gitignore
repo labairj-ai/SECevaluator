@@ -6,3 +6,11 @@ credentials.json
 __pycache__/
 *.pyc
 .DS_Store
+
+# Local report state and test/preview artifacts
+*.db
+*.db-*
+*.sqlite3
+*.sqlite3-*
+.coverage
+htmlcov/

@@ -2,8 +2,7 @@
 Description=SECevaluator weekly Sunday trigger
 
 [Timer]
-OnCalendar=Sun *-*-* 07:00:00
-TimeZone=America/New_York
+OnCalendar=Sun *-*-* 07:00:00 America/New_York
 Persistent=true
 
 [Install]

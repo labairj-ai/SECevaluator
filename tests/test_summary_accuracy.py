@@ -60,7 +60,7 @@ class AccuracyTests(unittest.TestCase):
         self.assertNotIn('Top 12 earn automatic',html)
 
     def test_poll_fallback_tracks_actual_poll_week(self):
-        polls=[dict(polls=[dict(poll='AP Top 25',ranks=[dict(school='S',rank=1)])])]
+        polls=[dict(season=2026,week=9,seasonType='regular',polls=[dict(poll='AP Top 25',ranks=[dict(school='S',rank=1)])])]
         with patch.object(d,'_get',side_effect=[[],polls]):
             ranks=d.fetch_rankings(2026,10)
         self.assertEqual((ranks.poll,ranks.week),('AP Top 25',9))

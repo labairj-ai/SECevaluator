@@ -1,13 +1,15 @@
 import base64
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 from html import escape
 from typing import Optional
 
-from metrics import TeamStats, ConferenceStats, CrossGameResult, TopWin, GameOfWeek
+from metrics import TeamStats, ConferenceStats, CrossGameResult, TopWin, GameOfWeek, h2h_leader
+from ai_summary import generate_summary
 
 
 # ── Colors ───────────────────────────────────────────────────────────────────
@@ -21,7 +23,7 @@ LOSS_RED     = "#f7c5c5"
 
 
 def _next_sunday() -> date:
-    today = date.today()
+    today = datetime.now(ZoneInfo("America/New_York")).date()
     days_ahead = 6 - today.weekday()
     if days_ahead <= 0:
         days_ahead += 7
@@ -54,7 +56,7 @@ def _td(content: str, bg: str = "", bold: bool = False, align: str = "left", col
 
 
 def _th(content: str, bg: str = TABLE_HDR_BG, color: str = "white", title: str = "") -> str:
-    tip = f" title='{title}'" if title else ""
+    tip = f" title='{escape(title, quote=True)}'" if title else ""
     return (f"<th{tip} style='padding:5px 7px;border:1px solid #555;background:{bg};"
             f"color:{color};text-align:left;cursor:default;font-size:12px;white-space:nowrap;'>{content}</th>")
 
@@ -73,7 +75,7 @@ def _team_row(t: TeamStats, idx: int) -> str:
     return (
         "<tr>"
         + _td(t.cfp_rank_str, bg=bg, bold=bool(t.cfp_rank), align="center")
-        + _td(t.team, bg=bg, bold=True)
+        + _td(escape(t.team), bg=bg, bold=True)
         + _record_cell(t, bg)
         + _td(t.sp_str, bg=bg, align="right")
         + _td(t.sos_str, bg=bg, align="right")
@@ -130,9 +132,9 @@ def _cross_conf_table_html(cross_games: list[CrossGameResult], sec_response: str
         conf_w = g.home_conference if winner == g.home_team else g.away_conference
         rows += (
             "<tr>"
-            + _td(f"Wk {g.week}", align="center")
+            + _td(f"Wk {g.period_label}", align="center")
             + _td(g.game_date, align="center")
-            + _td(score)
+            + _td(escape(score))
             + _td(f"+{margin}", align="center", bg=result_bg)
             + _td(conf_w, bold=True, color=_conf_color(conf_w), bg=result_bg)
             + "</tr>"
@@ -154,12 +156,19 @@ def _cross_conf_table_html(cross_games: list[CrossGameResult], sec_response: str
 """
 
 
+def _rate_leader(w1: int, l1: int, w2: int, l2: int) -> Optional[bool]:
+    if w1 + l1 == 0 or w2 + l2 == 0:
+        return None
+    difference = w1 * (w2 + l2) - w2 * (w1 + l1)
+    return difference > 0 if difference else None
+
+
 def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
     def _row(label: str, sec_val: str, big10_val: str, sec_better: Optional[bool] = None,
              sec_delta: str = "", b10_delta: str = "", tip: str = "") -> str:
         sec_bg  = WIN_GREEN if sec_better is True  else (LOSS_RED if sec_better is False else "white")
         b10_bg  = WIN_GREEN if sec_better is False else (LOSS_RED if sec_better is True  else "white")
-        label_td = f"<td style='padding:5px 10px;font-weight:bold;border:1px solid #ddd;' title='{tip}'>{label}</td>"
+        label_td = f"<td style='padding:5px 10px;font-weight:bold;border:1px solid #ddd;' title='{escape(tip, quote=True)}'>{label}</td>"
         sec_cell  = f"<td style='padding:5px 10px;text-align:center;border:1px solid #ddd;background:{sec_bg};'>{sec_val}<br>{sec_delta}</td>"
         b10_cell  = f"<td style='padding:5px 10px;text-align:center;border:1px solid #ddd;background:{b10_bg};'>{big10_val}<br>{b10_delta}</td>"
         return f"<tr>{label_td}{sec_cell}{b10_cell}</tr>"
@@ -174,7 +183,7 @@ def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
             "H2H Record",
             f"{sec.h2h_wins}-{sec.h2h_losses}",
             f"{big10.h2h_wins}-{big10.h2h_losses}",
-            sec_better=(sec.h2h_wins > sec.h2h_losses) if (sec.h2h_wins + sec.h2h_losses) > 0 else None,
+            sec_better=(sec.h2h_wins > sec.h2h_losses) if sec.h2h_wins != sec.h2h_losses else None,
             tip="Head-to-head record in games between SEC and Big Ten teams this season.",
         ),
         _row(
@@ -187,9 +196,7 @@ def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
             "External Record",
             f"{sec.nonconf_wins}-{sec.nonconf_losses}",
             f"{big10.nonconf_wins}-{big10.nonconf_losses}",
-            sec_better=(sec.nonconf_wins / max(sec.nonconf_wins + sec.nonconf_losses, 1)) >
-                       (big10.nonconf_wins / max(big10.nonconf_wins + big10.nonconf_losses, 1))
-                       if (sec.nonconf_wins + sec.nonconf_losses + big10.nonconf_wins + big10.nonconf_losses) > 0 else None,
+            sec_better=_rate_leader(sec.nonconf_wins, sec.nonconf_losses, big10.nonconf_wins, big10.nonconf_losses),
             tip="Record against non-conference opponents only — same-conference games (SEC vs SEC, Big Ten vs Big Ten) are excluded.",
         ),
         _row(
@@ -208,7 +215,7 @@ def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
             sec_better=(sec_sos > b10_sos) if (sec_sos is not None and b10_sos is not None) else None,
             sec_delta=_delta_str(sec.d_avg_sos, higher_is_better=True),
             b10_delta=_delta_str(big10.d_avg_sos, higher_is_better=True),
-            tip="Mean team-level SP+ of completed nonconference opponents; unavailable if opponent ratings are missing. Higher = harder schedule. Arrows show change vs last week.",
+            tip="Mean team-level SP+ of completed nonconference opponents; unavailable if opponent ratings are missing. Higher = harder schedule. Arrows show change vs prior saved report.",
         ),
         _row(
             "Poll Top-25 Teams",
@@ -223,7 +230,7 @@ def _comparison_table_html(sec: ConferenceStats, big10: ConferenceStats) -> str:
 <table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:12px;margin-bottom:20px;'>
   <caption style='text-align:left;font-size:15px;font-weight:bold;color:#333;padding-bottom:5px;'>
     Conference Comparison
-    <span style='font-size:11px;font-weight:normal;color:#888;margin-left:8px;'>▲▼ = change vs last week</span>
+    <span style='font-size:11px;font-weight:normal;color:#888;margin-left:8px;'>▲▼ = change vs prior saved report</span>
   </caption>
   <thead><tr>
     {_th("Metric")}
@@ -244,12 +251,12 @@ def _game_of_week_html(g: GameOfWeek) -> str:
 <div style='background:#fffbe6;border:2px solid #f0c040;border-radius:6px;
             padding:12px 16px;margin-bottom:20px;font-family:Arial,sans-serif;'>
   <div style='font-size:11px;font-weight:bold;color:#a07800;letter-spacing:1px;
-              text-transform:uppercase;margin-bottom:6px;'>&#9733; Game of the Week — Week {g.week}</div>
+              text-transform:uppercase;margin-bottom:6px;'>&#9733; Game of the Week — Week {g.period_label}</div>
   <div style='font-size:15px;font-weight:bold;'>
-    <span style='color:{away_color};'>{g.away_team}</span>
+    <span style='color:{away_color};'>{escape(g.away_team)}</span>
     <span style='color:#888;font-size:11px;margin:0 6px;'>{away_sp_str}</span>
     <span style='color:#555;'> at </span>
-    <span style='color:{home_color};'>{g.home_team}</span>
+    <span style='color:{home_color};'>{escape(g.home_team)}</span>
     <span style='color:#888;font-size:11px;margin-left:6px;'>{home_sp_str}</span>
   </div>
   <div style='font-size:11px;color:#888;margin-top:4px;'>{g.game_date}</div>
@@ -267,9 +274,9 @@ def _top_wins_html(sec_wins: list[TopWin], big10_wins: list[TopWin]) -> str:
             bg = ROW_ALT if i % 2 else "white"
             rows += (
                 "<tr>"
-                + _td(f"Wk {w.week}", bg=bg, align="center")
-                + _td(w.team, bg=bg, bold=True)
-                + _td(w.opponent, bg=bg)
+                + _td(f"Wk {w.period_label}", bg=bg, align="center")
+                + _td(escape(w.team), bg=bg, bold=True)
+                + _td(escape(w.opponent), bg=bg)
                 + _td(w.score_str, bg=bg, align="center")
                 + _td(f"+{w.margin}", bg=bg, align="center")
                 + _td(f"{w.opponent_sp:+.1f}", bg=bg, align="right")
@@ -311,7 +318,7 @@ def _metric_legend_html() -> str:
   <strong style='color:#555;'>Metric Guide:</strong>
   <span style='margin-left:12px;'><strong>External</strong> — wins/losses vs non-conference opponents only; same-conference games excluded.</span>
   <span style='margin-left:12px;'><strong>SP+</strong> — ESPN's predictive rating adjusted for opponent quality. 0 = average FBS team; +10 means ~10 pts/game better than average.</span>
-  <span style='margin-left:12px;'><strong>OOC SOS</strong> — avg SP+ of non-conference opponents faced. Higher = harder external schedule. Arrows (▲▼) show week-over-week change.</span>
+  <span style='margin-left:12px;'><strong>OOC SOS</strong> — avg SP+ of non-conference opponents faced. Higher = harder external schedule. Arrows (▲▼) show change vs prior saved report.</span>
   <span style='margin-left:12px;'><strong>Poll Rank</strong> — Selected available poll ranking. Poll rankings alone do not establish playoff qualification.</span>
 </div>
 """
@@ -329,7 +336,9 @@ def build_html(
     sec_top_wins: Optional[list[TopWin]] = None,
     big10_top_wins: Optional[list[TopWin]] = None,
     game_of_week: Optional[GameOfWeek] = None,
+    season_type: str = "regular",
 ) -> str:
+    period = f"Postseason Week {week}" if season_type == "postseason" else f"Week {week}"
     next_sun = _next_sunday().strftime("%B %d, %Y")
 
     if ai_text:
@@ -358,12 +367,12 @@ def build_html(
 
   <div style='background:{HEADER_BG};color:white;padding:18px 20px;'>
     <div style='font-size:21px;font-weight:bold;letter-spacing:0.5px;'>⚔ SEC vs Big Ten — Conference War</div>
-    <div style='font-size:13px;margin-top:4px;opacity:0.7;'>{year} Season &bull; Week {week} Report</div>
+    <div style='font-size:13px;margin-top:4px;opacity:0.7;'>{year} Season &bull; {period} Report</div>
     <div style='margin-top:12px;font-size:17px;font-weight:bold;'>
       <span style='color:#ff9999;'>SEC</span>
       <span style='margin:0 10px;opacity:0.5;'>vs</span>
       <span style='color:#99bbff;'>Big Ten</span>
-      <span style='margin-left:18px;font-size:14px;font-weight:normal;opacity:0.85;'>{h2h_leader_str}</span>
+      <span style='margin-left:18px;font-size:14px;font-weight:normal;opacity:0.85;'>{escape(h2h_leader_str)}</span>
     </div>
   </div>
 
@@ -398,9 +407,11 @@ def build_text(
     sec_top_wins: Optional[list[TopWin]] = None,
     big10_top_wins: Optional[list[TopWin]] = None,
     game_of_week: Optional[GameOfWeek] = None,
+    season_type: str = "regular",
 ) -> str:
+    period = f"Postseason Week {week}" if season_type == "postseason" else f"Week {week}"
     lines = [
-        f"SECevaluator — {year} Season Week {week}",
+        f"SECevaluator — {year} Season {period}",
         "=" * 50,
         f"SEC vs Big Ten H2H: {h2h_leader_str}",
         "",
@@ -410,7 +421,7 @@ def build_text(
 
     lines.append(f"Rankings: {sec.poll_label or 'Unavailable'}")
     lines += ["CONFERENCE COMPARISON (SP+ = quality rating, 0=avg; SOS = schedule difficulty, higher=harder)", "-" * 30]
-    sp_note = "(▲▼ = change vs last week)"
+    sp_note = "(▲▼ = change vs prior saved report)"
     lines.append(f"{'Metric':<26} {'SEC':>10} {'Big Ten':>10}  {sp_note}")
 
     def _fmt_delta(d):
@@ -441,14 +452,14 @@ def build_text(
         hsp = f"SP+ {g.home_sp:+.1f}" if g.home_sp is not None else ""
         asp = f"SP+ {g.away_sp:+.1f}" if g.away_sp is not None else ""
         lines += ["GAME OF THE WEEK", "-" * 30,
-                  f"  Wk {g.week} | {g.away_team} ({asp}) at {g.home_team} ({hsp}) — {g.game_date}", ""]
+                  f"  Wk {g.period_label} | {g.away_team} ({asp}) at {g.home_team} ({hsp}) — {g.game_date}", ""]
 
     played = [g for g in cross_games if g.played]
     if played:
         lines += ["CROSS-CONFERENCE RESULTS", "-" * 30]
         for g in played:
             margin = abs((g.home_points or 0) - (g.away_points or 0))
-            lines.append(f"  Wk {g.week:2d} | {g.score_str()}  (+{margin})")
+            lines.append(f"  Wk {g.period_label:>6} | {g.score_str()}  (+{margin})")
         lines.append("")
 
     for wins, label in ((sec_top_wins or [], "SEC"), (big10_top_wins or [], "Big Ten")):
@@ -456,7 +467,7 @@ def build_text(
             lines += [f"{label} BEST WINS (by opponent SP+)", "-" * 30,
                       f"  {'Wk':>3} {'Winner':<22} {'Opponent':<22} {'Score':>8} {'Opp SP+':>8}"]
             for w in wins:
-                lines.append(f"  {w.week:>3} {w.team:<22} {w.opponent:<22} {w.score_str:>8} {w.opponent_sp:>+8.1f}")
+                lines.append(f"  {w.period_label:>6} {w.team:<22} {w.opponent:<22} {w.score_str:>8} {w.opponent_sp:>+8.1f}")
             lines.append("")
 
     for conf in (sec, big10):
@@ -485,12 +496,17 @@ def build_email(
     sec_top_wins: Optional[list[TopWin]] = None,
     big10_top_wins: Optional[list[TopWin]] = None,
     game_of_week: Optional[GameOfWeek] = None,
+    season_type: str = "regular",
 ) -> tuple[str, str, str]:
-    subject = f"SECevaluator {year} Wk {week} | {h2h_leader_str}"
+    # The delivery boundary recomputes all narrative/headlines from evidence.
+    ai_text = generate_summary(sec, big10, cross_games, h2h_leader_str, week, year, season_type)
+    h2h_leader_str = h2h_leader(sec, big10)
+    period = f"Postseason Wk {week}" if season_type == "postseason" else f"Wk {week}"
+    subject = f"SECevaluator {year} {period} | {h2h_leader_str}"
     text = build_text(sec, big10, cross_games, ai_text, h2h_leader_str, week, year,
-                      sec_top_wins, big10_top_wins, game_of_week)
+                      sec_top_wins, big10_top_wins, game_of_week, season_type)
     html = build_html(sec, big10, cross_games, ai_text, h2h_leader_str, week, sec_response, year,
-                      sec_top_wins, big10_top_wins, game_of_week)
+                      sec_top_wins, big10_top_wins, game_of_week, season_type)
     return subject, text, html
 
 
@@ -514,8 +530,12 @@ def get_gmail_service():
 
 
 def send_gmail(sender: str, recipients: list[str], subject: str, text_body: str, html_body: str) -> None:
-    if not sender:
-        raise ValueError("SENDER_EMAIL is empty.")
+    if not sender or "\r" in sender or "\n" in sender:
+        raise ValueError("Invalid sender")
+    if not recipients or any(not isinstance(r, str) or "@" not in r or "\r" in r or "\n" in r for r in recipients):
+        raise ValueError("A nonempty valid recipient list is required")
+    if "\r" in subject or "\n" in subject:
+        raise ValueError("Invalid email subject")
     msg = MIMEMultipart("alternative")
     msg["To"]      = ", ".join(recipients)
     msg["From"]    = sender

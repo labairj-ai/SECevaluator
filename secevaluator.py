@@ -3,6 +3,7 @@ import argparse
 import os
 import sys
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from config import (
     RECIPIENTS, SENDER_EMAIL, TEST_TO_EMAILS,
@@ -20,7 +21,7 @@ from metrics import (
 )
 from ai_summary import generate_summary
 from email_builder import build_email, send_gmail
-from db import init_db, save_snapshot, load_prior_snapshot
+from db import init_db, save_snapshots, load_prior_snapshot
 
 
 LOG_FILE = "secevaluator.log"
@@ -39,7 +40,7 @@ def log(msg: str) -> None:
 def in_season(year: int) -> bool:
     if year != YEAR:
         return True  # historical runs always allowed
-    today = date.today()
+    today = datetime.now(ZoneInfo("America/New_York")).date()
     return SEASON_START <= today <= SEASON_END
 
 
@@ -47,10 +48,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--year",  type=int, default=YEAR,  help="Season year (default: current)")
     parser.add_argument("--week",  type=int, default=None,  help="Override week number")
+    parser.add_argument("--season-type", choices=("regular", "postseason"), default=None, help="Season type for explicit --week")
+    parser.add_argument("--dry-run", action="store_true", help="Validate/render only; no mail or snapshot writes")
     parser.add_argument("--force", action="store_true",     help="Run even if off-season")
     parser.add_argument("--test",  action="store_true",     help="Send to TEST_TO_EMAILS only, don't save snapshot")
     args = parser.parse_args()
 
+    if args.week is not None and not 1 <= args.week <= 25:
+        parser.error("--week must be between 1 and 25")
+    if args.year != YEAR and args.week is None:
+        parser.error("Historical seasons require an explicit --week")
     year = args.year
     test_mode = args.test or bool(TEST_TO_EMAILS)
 
@@ -58,13 +65,21 @@ def main() -> None:
         log(f"Off-season ({date.today()} outside {SEASON_START}–{SEASON_END}). Use --force to override.")
         return
 
-    init_db()
+    if not args.dry_run:
+        if test_mode and not TEST_TO_EMAILS:
+            parser.error("--test requires a nonempty TEST_TO_EMAILS list; no mail sent")
+        if not test_mode:
+            init_db()
     log(f"SECevaluator starting — YEAR={year}, fetching data...")
 
-    week = args.week if args.week else data_fetcher.get_current_week()
-
     try:
-        data = fetch_all_data(year, week)
+        if args.week is None:
+            if args.season_type is not None:
+                parser.error("--season-type requires --week")
+            week, season_type = data_fetcher.get_current_period(year)
+        else:
+            week, season_type = args.week, args.season_type or "regular"
+        data = fetch_all_data(year, week, season_type)
     except Exception as e:
         log(f"ERROR fetching data: {e}")
         sys.exit(1)
@@ -79,12 +94,15 @@ def main() -> None:
     big10_stats = build_conference_stats(BIG10_CONF_RESPONSE, BIG10_DISPLAY, big10_teams, cross_results, SEC_CONF_RESPONSE)
 
     poll = data["rankings"]
-    poll_label = f"{poll.poll}, week {poll.week}" if poll.poll else None
+    poll_period = "postseason " if poll.season_type == "postseason" else ""
+    poll_label = f"{poll.poll}, {poll_period}week {poll.week}" if poll.poll else None
     sec_stats.poll_label = big10_stats.poll_label = poll_label
 
     # Load prior week snapshots for week-over-week deltas
-    prior_sec   = load_prior_snapshot(year, week, SEC_CONF_RESPONSE)
-    prior_big10 = load_prior_snapshot(year, week, BIG10_CONF_RESPONSE)
+    prior_sec   = load_prior_snapshot(year, week, SEC_CONF_RESPONSE, season_type)
+    prior_big10 = load_prior_snapshot(year, week, BIG10_CONF_RESPONSE, season_type)
+    if prior_sec and prior_big10 and (prior_sec["season_type"], prior_sec["week"]) != (prior_big10["season_type"], prior_big10["week"]):
+        prior_sec = prior_big10 = None
     for stats, prior in ((sec_stats, prior_sec), (big10_stats, prior_big10)):
         if prior:
             for field in ("avg_sp_rating", "avg_sos"):
@@ -104,16 +122,22 @@ def main() -> None:
         log(f"Game of the Week: {game_of_week.away_team} at {game_of_week.home_team} (Wk {game_of_week.week})")
 
     log("Building validated data summary...")
-    ai_text = generate_summary(sec_stats, big10_stats, cross_results, leader_str, week, year=args.year)
+    ai_text = generate_summary(sec_stats, big10_stats, cross_results, leader_str, week, year=args.year, season_type=season_type)
     if not ai_text:
-        log("ERROR: AI summary unavailable. Aborting — email not sent.")
+        log("ERROR: Data summary unavailable. Aborting — email not sent.")
         sys.exit(1)
     log("Data summary validated.")
 
     subject, text_body, html_body = build_email(
         sec_stats, big10_stats, cross_results, ai_text, leader_str, week, SEC_CONF_RESPONSE, year,
-        sec_top_wins, big10_top_wins, game_of_week,
+        sec_top_wins, big10_top_wins, game_of_week, season_type,
     )
+
+    if args.dry_run:
+        print(subject)
+        print(text_body)
+        log("DRY_RUN complete: no email sent and no snapshots written.")
+        return
 
     recipients = TEST_TO_EMAILS if test_mode else RECIPIENTS
     sender = SENDER_EMAIL
@@ -121,7 +145,7 @@ def main() -> None:
         log("ERROR: SENDER_EMAIL not set.")
         sys.exit(1)
 
-    log(f"Sending to: {', '.join(recipients)}")
+    log(f"Sending to {len(recipients)} recipient(s).")
     try:
         send_gmail(sender, recipients, subject, text_body, html_body)
         log("Email sent successfully.")
@@ -131,8 +155,7 @@ def main() -> None:
 
     # Save snapshot after successful send (skip for test mode so it doesn't pollute history)
     if not test_mode:
-        save_snapshot(year, week, SEC_CONF_RESPONSE,   sec_stats)
-        save_snapshot(year, week, BIG10_CONF_RESPONSE, big10_stats)
+        save_snapshots(year, week, [(SEC_CONF_RESPONSE, sec_stats), (BIG10_CONF_RESPONSE, big10_stats)], season_type)
         log("Weekly snapshot saved.")
 
 

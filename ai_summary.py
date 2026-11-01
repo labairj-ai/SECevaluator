@@ -3,7 +3,7 @@ from config import YEAR
 from metrics import h2h_leader, build_conference_stats
 
 
-def generate_summary(sec_stats, big10_stats, cross_games, h2h_leader_str, week, year=YEAR):
+def generate_summary(sec_stats, big10_stats, cross_games, h2h_leader_str, week, year=YEAR, season_type="regular"):
     # Recompute the headline rather than trusting a potentially stale caller string.
     leader = h2h_leader(sec_stats, big10_stats)
     played = [g for g in cross_games if g.winner() is not None]
@@ -11,7 +11,8 @@ def generate_summary(sec_stats, big10_stats, cross_games, h2h_leader_str, week, 
     if ((sec_stats.h2h_wins, sec_stats.h2h_losses) != (expected.h2h_wins, expected.h2h_losses)
             or (big10_stats.h2h_losses, big10_stats.h2h_wins) != (expected.h2h_wins, expected.h2h_losses)):
         raise ValueError("Inconsistent head-to-head summary evidence")
-    sentences = [f"Season-to-date {year} report (report week {week}): {leader}."]
+    period = f"postseason week {week}" if season_type == "postseason" else f"week {week}"
+    sentences = [f"Season-to-date {year} report (report {period}): {leader}."]
     sentences.append(f"Overall records are SEC {sec_stats.total_wins}-{sec_stats.total_losses} "
                      f"and Big Ten {big10_stats.total_wins}-{big10_stats.total_losses}; "
                      "these include conference games and are separate from head-to-head results.")

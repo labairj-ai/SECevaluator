@@ -1,24 +1,23 @@
 # SECevaluator
 
-Weekly college football conference rivalry digest comparing the SEC and Big Ten. Every Sunday at 7am ET during the season, it fetches current standings, computes head-to-head records, ranks the best wins by opponent quality, and generates an AI-written narrative — then emails it to a distribution list.
+Weekly college football conference rivalry digest comparing the SEC and Big Ten. Every Sunday at 7am ET during the season, it fetches current standings, computes head-to-head records, ranks the best wins by opponent quality, and generates a validated, facts-based narrative — then emails it to a distribution list.
 
 ## What It Sends
 
 Each email includes:
 
-- **Game of the Week** — highest-stakes upcoming SEC vs Big Ten matchup by combined SP+ rating
-- **AI Analysis** — 2-paragraph narrative from a 70B LLM, framed around who's winning the conference war
-- **Conference Comparison** — head-to-head record, overall, external (non-conference), avg SP+, avg OOC SOS, CFP ranked teams; with week-over-week delta arrows
+- **Game of the Week** — highest combined-SP+ upcoming SEC vs Big Ten matchup by combined SP+ rating
+- **Data Summary** — 2 paragraphs generated from reconciled results, ratings and identified poll evidence
+- **Conference Comparison** — head-to-head record, overall, external (non-conference), avg SP+, avg OOC SOS, selected-poll ranked teams; with arrows against the prior comparable saved report
 - **Cross-Conference Results** — every SEC vs Big Ten game played, with score and margin
 - **Best Wins** — top 5 wins per conference ranked by opponent SP+ rating
-- **Standings** — all SEC and Big Ten teams with overall / conference / external records, SP+, OOC SOS, CFP rank
+- **Standings** — all SEC and Big Ten teams with overall / conference / external records, SP+, OOC SOS, selected-poll rank
 
 ## Data Sources
 
 | Source | What it provides |
 |---|---|
-| [College Football Data API](https://collegefootballdata.com) | Records, games, SP+ ratings, CFP rankings |
-| Mac Studio MLX (local) | AI narrative via `mlx-community/Llama-3.3-70B-Instruct-4bit` |
+| [College Football Data API](https://collegefootballdata.com) | Season calendar, records, games, SP+ ratings and named FBS polls |
 | Gmail API (OAuth2) | Email delivery |
 
 ## Metric Glossary
@@ -26,7 +25,7 @@ Each email includes:
 - **SP+** — ESPN's predictive team quality rating, adjusted for opponent strength. 0 = average FBS team; +10 means roughly 10 points per game better than average.
 - **OOC SOS** — Out-of-Conference Strength of Schedule. Average SP+ of non-conference opponents faced. Higher = harder external slate.
 - **External Record** — wins/losses against non-conference opponents only; same-conference games excluded.
-- **CFP Rank** — College Football Playoff committee ranking. Top 12 earn automatic playoff bids.
+- **Poll Rank** — rank in the actual named poll and week (CFP preferred when available, then AP, then Coaches). Rankings do not by themselves establish playoff qualification.
 
 ## Season Window
 
@@ -36,10 +35,9 @@ Runs weekly (Sundays 7am ET) from the first game weekend through the CFP Nationa
 
 ### Requirements
 
-- Python 3.9+
+- Python 3.10+
 - A free API key from [collegefootballdata.com](https://collegefootballdata.com/key)
 - Gmail OAuth2 credentials (same app as dansbytracker — copy `credentials.json` and `token.json`)
-- Mac Studio running MLX at `http://100.73.128.40:8080` (or update `MAC_STUDIO_URL` in `config.py`)
 
 ### Local dev
 
@@ -62,7 +60,7 @@ CFBD_API_KEY=your_key_here
 
 ```bash
 # Send to yourself using a historical season week
-source .env
+set -a; source .env; set +a
 TEST_TO_EMAILS=you@gmail.com venv/bin/python3 secevaluator.py --year 2025 --week 10 --test --force
 
 # Current season test (bypasses off-season check)
@@ -74,8 +72,10 @@ TEST_TO_EMAILS=you@gmail.com venv/bin/python3 secevaluator.py --test --force
 | Flag | Description |
 |---|---|
 | `--year YYYY` | Pull data for a historical season (default: current year) |
-| `--week N` | Override week number (default: computed from season start date) |
-| `--test` | Send to `TEST_TO_EMAILS` instead of the full recipient list |
+| `--week N` | Override poll/report week; current default comes from the CFBD season calendar |
+| `--test` | Send only to a required nonempty `TEST_TO_EMAILS` list; no snapshots |
+| `--dry-run` | Fetch, validate and render without Gmail or snapshot/database writes |
+| `--season-type regular/postseason` | Season type for an explicit `--week`; regular by default |
 | `--force` | Bypass the off-season window check |
 
 ## Deployment (Optiplex)
@@ -119,9 +119,9 @@ secevaluator.py     — main orchestration, CLI args
 config.py           — constants, env vars, season dates
 data_fetcher.py     — College Football Data API calls
 metrics.py          — TeamStats / ConferenceStats dataclasses, top wins, game of week
-ai_summary.py       — Mac Studio LLM prompt + HTTP call
+ai_summary.py       — validated deterministic narrative from report evidence
 email_builder.py    — HTML + plain text email builder, Gmail send
-db.py               — SQLite weekly snapshots for week-over-week deltas
+db.py               — atomic, season-aware paired report snapshots
 systemd/            — secevaluator.service + secevaluator.timer
 ```
 
@@ -161,3 +161,37 @@ handle zero ratings and missing comparisons.
 These checks establish internal consistency against CFBD evidence; they cannot
 guarantee that the upstream provider itself has no errors. Reports describe
 season-to-date data, not a historical week cutoff when replaying an old week.
+
+### Full review safeguards
+
+- All required API failures abort rather than silently producing empty data;
+  empty successful rankings/ratings responses remain explicitly unavailable.
+- Validate game, record, poll and rating season/conference identities. The
+  provider calendar determines the current week, including its uneven week 1.
+  Postseason rankings can fall back to the last available regular-season poll.
+- Reject past unplayed games as upcoming features and require both SP+ ratings
+  to rank upcoming matchups. Tied comparisons receive no winner/loser colors.
+- The email delivery boundary recomputes the headline and summary from the
+  validated games; caller-supplied stale commentary cannot override the facts.
+- New `report_snapshots` rows are saved for both conferences in one transaction.
+  The legacy `weekly_snapshots` table is preserved without alteration and is not
+  used for comparisons against the stricter v2 metric definitions. Regular and
+  postseason week numbers are separate keys. Missing ranked counts are NULL.
+- `--dry-run` can write diagnostic logs but never sends mail, initializes the
+  database or saves snapshots. Test sends require explicit test recipients.
+- The timer source uses an explicit IANA zone inside `OnCalendar`; `TimeZone`
+  is not a valid timer directive ([systemd calendar syntax](https://www.freedesktop.org/software/systemd/man/latest/systemd.time.html)).
+  Updating Git does not install or restart the timer.
+
+Read-only report preview (requires the CFBD key but no Gmail authentication):
+
+```sh
+set -a; source .env; set +a
+venv/bin/python3 secevaluator.py --dry-run
+```
+
+Historical `--week` selects the report/poll context; records and ratings remain
+season-to-date as supplied by CFBD, not a reconstructed historical cutoff.
+Gmail delivery and SQLite cannot form a single atomic transaction: an ambiguous
+network failure or a snapshot failure after delivery needs operator review
+before retrying, to avoid duplicate email. No automatic mail retry is added.

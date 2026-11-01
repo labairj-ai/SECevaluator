@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
 import math
 
@@ -66,6 +67,12 @@ class CrossGameResult:
     neutral_site: bool = False
     game_date: str = ""
     completed: bool = False
+    season_type: str = "regular"
+    start_time: str = ""
+
+    @property
+    def period_label(self) -> str:
+        return f"Post {self.week}" if self.season_type == "postseason" else str(self.week)
 
     @property
     def played(self) -> bool:
@@ -194,6 +201,10 @@ def build_team_stats(
     team_names = {r["team"] for r in records}
     if len(team_names) != len(records):
         raise ValueError("Duplicate team records")
+    for game in all_conf_games:
+        for side in ("home", "away"):
+            if game.get(side + "Conference") == conference_display and game.get(side + "Team") not in team_names:
+                raise ValueError("Conference roster is missing a scheduled team")
 
     teams = []
     for row in records:
@@ -255,6 +266,8 @@ def build_cross_game_results(raw_games: list[dict]) -> list[CrossGameResult]:
                 raise ValueError("Invalid completed game scores")
         results.append(CrossGameResult(
             completed=g.get("completed") is True,
+            season_type=g.get("seasonType", "regular"),
+            start_time=g.get("startDate") or "",
             week=g.get("week", 0),
             home_team=g.get("homeTeam", ""),
             home_conference=g.get("homeConference", ""),
@@ -265,7 +278,7 @@ def build_cross_game_results(raw_games: list[dict]) -> list[CrossGameResult]:
             neutral_site=g.get("neutralSite", False),
             game_date=(g.get("startDate") or "")[:10],
         ))
-    return sorted(results, key=lambda g: (g.week, g.game_date))
+    return sorted(results, key=lambda g: (g.season_type == "postseason", g.week, g.game_date))
 
 
 def build_conference_stats(
@@ -318,6 +331,11 @@ class TopWin:
     loser_score: int
     week: int
     margin: int
+    season_type: str = "regular"
+
+    @property
+    def period_label(self) -> str:
+        return f"Post {self.week}" if self.season_type == "postseason" else str(self.week)
 
     @property
     def score_str(self) -> str:
@@ -367,6 +385,7 @@ def compute_top_wins(
             loser_score=ls,
             week=g.get("week", 0),
             margin=ws - ls,
+            season_type=g.get("seasonType", "regular"),
         ))
 
     return sorted(wins, key=lambda w: -w.opponent_sp)[:n]
@@ -384,6 +403,11 @@ class GameOfWeek:
     home_sp: Optional[float]
     away_sp: Optional[float]
     game_date: str
+    season_type: str = "regular"
+
+    @property
+    def period_label(self) -> str:
+        return f"Post {self.week}" if self.season_type == "postseason" else str(self.week)
 
     @property
     def combined_sp(self) -> float:
@@ -398,9 +422,19 @@ class GameOfWeek:
 def compute_game_of_week(
     cross_games: list[CrossGameResult],
     sp_ratings: dict,
+    now: Optional[datetime] = None,
 ) -> Optional[GameOfWeek]:
     """Return the highest-quality upcoming SEC vs Big Ten matchup by combined SP+."""
-    upcoming = [g for g in cross_games if not g.completed and g.home_points is None and g.away_points is None]
+    now = now or datetime.now(timezone.utc)
+    upcoming = []
+    for game in cross_games:
+        if game.completed or game.home_points is not None or game.away_points is not None or not game.start_time:
+            continue
+        start = datetime.fromisoformat(game.start_time.replace("Z", "+00:00"))
+        if start.tzinfo is None:
+            raise ValueError("Game start time has no timezone")
+        if start > now:
+            upcoming.append(game)
     if not upcoming:
         return None
 
@@ -408,6 +442,8 @@ def compute_game_of_week(
     for g in upcoming:
         home_sp = (sp_ratings.get(g.home_team) or {}).get("rating")
         away_sp = (sp_ratings.get(g.away_team) or {}).get("rating")
+        if home_sp is None or away_sp is None:
+            continue  # missing ratings cannot be treated as a score of zero
         candidate = GameOfWeek(
             week=g.week,
             home_team=g.home_team,
@@ -417,6 +453,7 @@ def compute_game_of_week(
             home_sp=home_sp,
             away_sp=away_sp,
             game_date=g.game_date,
+            season_type=g.season_type,
         )
         if best is None or candidate.combined_sp > best.combined_sp:
             best = candidate
