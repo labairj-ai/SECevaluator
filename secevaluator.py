@@ -82,7 +82,8 @@ def main() -> None:
         data = fetch_all_data(year, week, season_type)
     except Exception as e:
         log(f"ERROR fetching data: {e}")
-        sys.exit(1)
+        status = data_fetcher.TEMPORARY_FETCH_FAILURE if data_fetcher.is_temporary_fetch_error(e) else 1
+        sys.exit(status)
 
     log(f"Data fetched. Week {week}. SEC={len(data['sec_records'])}, Big Ten={len(data['big10_records'])}, cross-conf games={len(data['cross_games'])}")
 

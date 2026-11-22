@@ -194,7 +194,14 @@ Historical `--week` selects the report/poll context; records and ratings remain
 season-to-date as supplied by CFBD, not a reconstructed historical cutoff.
 Gmail delivery and SQLite cannot form a single atomic transaction: an ambiguous
 network failure or a snapshot failure after delivery needs operator review
-before retrying, to avoid duplicate email. No automatic mail retry is added.
+before retrying, to avoid duplicate email.
+
+The scheduled runner waits five minutes after an exhausted transient CFBD fetch
+failure and ten minutes after a second such failure. The entire digest run has
+one 30-minute budget. Only the explicit exit from the data-fetch phase permits
+a retry. Invalid data, authentication failures, unknown exits, process timeouts,
+and failures during or after Gmail delivery end the run and send an owner alert.
+The timer remains at 7:00 a.m. Eastern on Sundays.
 
 
 ### Rated-opponent coverage (metric version 3)
