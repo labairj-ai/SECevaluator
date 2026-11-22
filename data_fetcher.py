@@ -10,11 +10,21 @@ from config import CFBD_API_KEY, YEAR, SEC_CONF_PARAM, BIG10_CONF_PARAM, BIG10_C
 BASE_URL = "https://api.collegefootballdata.com"
 HTTP_TIMEOUT = 30
 HTTP_ATTEMPTS = 3
+TEMPORARY_FETCH_FAILURE = 75
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def _headers() -> dict:
     return {"Authorization": f"Bearer {CFBD_API_KEY}"}
+
+
+def is_temporary_fetch_error(error: Exception) -> bool:
+    if isinstance(error, requests.exceptions.SSLError):
+        return False
+    if isinstance(error, (requests.Timeout, requests.ConnectionError)):
+        return True
+    return (isinstance(error, requests.HTTPError) and error.response is not None
+            and error.response.status_code in RETRYABLE_STATUS_CODES)
 
 
 def _get(path: str, params: dict) -> list:
@@ -24,7 +34,7 @@ def _get(path: str, params: dict) -> list:
             r.raise_for_status()
         except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as exc:
             status = exc.response.status_code if exc.response is not None else None
-            if isinstance(exc, requests.HTTPError) and status not in RETRYABLE_STATUS_CODES:
+            if not is_temporary_fetch_error(exc):
                 raise
             if attempt == HTTP_ATTEMPTS:
                 print(f"CFBD {path}: failed after {attempt} attempts ({type(exc).__name__}, status={status})", flush=True)
